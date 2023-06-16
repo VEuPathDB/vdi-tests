@@ -1,6 +1,9 @@
 package org.veupathdb.vdi.test
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.dataformat.yaml.YAMLFactory
+import com.fasterxml.jackson.module.kotlin.KotlinModule
+import com.fasterxml.jackson.module.kotlin.readValue
 import io.restassured.RestAssured
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
@@ -13,20 +16,17 @@ import org.junit.jupiter.api.TestInstance
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.MethodSource
 import java.net.URL
-import java.nio.file.FileVisitOption
-import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Duration
 import java.util.stream.Stream
-import kotlin.io.path.isDirectory
 import kotlin.io.path.name
-
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class ApiTest {
     private val AuthToken: String = System.getProperty("AUTH_TOKEN")
     private val AuthTokenKey: String = "Auth-Key"
-    private val ObjectMapper = ObjectMapper()
+    private val YamlMapper = ObjectMapper(YAMLFactory()).registerModule(KotlinModule.Builder().build())
+    private val JsonMapper = ObjectMapper().registerModule(KotlinModule.Builder().build())
 
     // Files in the testdata resource directory must follow structure testdata/{dataset-type}/{upload-file}
     private val TestFilesDir = "testdata"
@@ -44,7 +44,7 @@ class ApiTest {
         DatasetsToClean.forEach {
             logger().info("Cleaning dataset $it")
             given()
-                .header("Auth-Key", System.getProperty("AUTH_TOKEN"))
+                .header(AuthTokenKey, AuthToken)
                 .`when`()
                 .delete("vdi-datasets/$it")
                 .then()
@@ -53,56 +53,62 @@ class ApiTest {
     }
 
     @ParameterizedTest
-    @MethodSource("fileProvider")
+    @MethodSource("yamlTestCaseProvider")
     fun parameterizedTest(input: TestCase) {
+        val path = Path.of(input.path)
         val meta: Map<String, Any> = mapOf(
-            Pair(
-                "datasetType",
-                mapOf(
-                    Pair("name", input.type),
-                    Pair("version", "1.0")
-                )
+            "datasetType" to mapOf(
+                "name" to input.type,
+                "version" to "1.0"
             ),
-            Pair("name", input.path.fileName),
-            Pair("summary", "Integration test case for file ${input.path.fileName}"),
-            Pair("projects", listOf(input.project)),
-            Pair("dependencies", emptyList<String>())
+            "name" to path.name,
+            "summary" to "Integration test case for file ${input.path}",
+            "projects" to listOf(input.project),
+            "dependencies" to emptyList<String>()
         )
+
+        logger().info("Sending meta ${JsonMapper.writeValueAsString(meta)}")
         val datasetID = given() // Setup request
             .contentType(ContentType.MULTIPART)
             .header(AuthTokenKey, AuthToken)
-            .multiPart("file", input.path.toFile())
-            .multiPart("meta", ObjectMapper.writeValueAsString(meta))
+            .multiPart("file", path.toFile())
+            .multiPart("meta", JsonMapper.writeValueAsString(meta))
             // Execute request
             .`when`()
             .post("vdi-datasets")
             // Validate request and extract ID
             .then()
-            .statusCode(input.status)
+            .statusCode(200)
             .extract()
             .path<String>("datasetID")
         DatasetsToClean.add(datasetID)
+        logger().info("Issued datasetID: $datasetID")
 
-        awaitImportStatus(datasetID, "complete")
-        awaitInstallStatus(datasetID, "complete")
-        logger().info("Completed install of dataset $datasetID")
+        awaitImportStatus(datasetID, if (input.expectation == Expectation.FAILED_IMPORT) "failed-import" else "complete")
+
+        if (input.expectation != Expectation.FAILED_IMPORT)
+            awaitInstallStatus(datasetID, if (input.expectation == Expectation.FAILED_INSTALL) "failed-installation" else "complete")
     }
 
-    private fun fileProvider(): Stream<TestCase> {
+    /**
+     * Provide test cases from YAML file.
+     */
+    private fun yamlTestCaseProvider(): Stream<TestCase> {
         val loader = Thread.currentThread().contextClassLoader
         val url: URL = loader.getResource(TestFilesDir)!!
-        val path: String = url.path
-        return Files.walk(Path.of(path), FileVisitOption.FOLLOW_LINKS)
-            .filter { file -> !file.isDirectory() }
-            .map { file -> TestCase(file, 200, file.parent.name, "PlasmoDB") } // TODO Determine what status and project we should use for the test.
+        val testDataDir: String = url.path
+        val testConfig = Path.of(testDataDir, "tests.yaml")
+        val testSuite: TestSuite = YamlMapper.readValue(testConfig.toFile())
+        return testSuite.tests.stream()
+            .map {
+                TestCase(
+                    path = Path.of(testDataDir, it.path).toString(), // Construct path relative to testdata directory
+                    expectation = it.expectation,
+                    project = it.project,
+                    type = it.type
+                )
+            }
     }
-
-    class TestCase(
-        val path: Path,
-        val status: Int,
-        val project: String,
-        val type: String
-    )
 
     private fun awaitInstallStatus(datasetID: String, status: String) {
         try {
