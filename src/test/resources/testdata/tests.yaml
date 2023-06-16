@@ -1,0 +1,15 @@
+tests: # These tests are modeled by the TestCase data object. All paths are relative to the testdata directory.
+- path: genelist/genelist-1.txt
+  project: PlasmoDB
+  expectation: success
+  type: genelist
+
+- path: genelist/genelist-duplicates.txt
+  project: PlasmoDB
+  expectation: success
+  type: genelist
+
+- path: isasimple/diy-example.csv
+  project: PlasmoDB
+  expectation: failed_install
+  type: isasimple

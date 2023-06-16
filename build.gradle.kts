@@ -9,6 +9,9 @@ dependencies {
 
   testImplementation("com.fasterxml.jackson.core:jackson-core:2.15.1")
   testImplementation("com.fasterxml.jackson.core:jackson-databind:2.15.1")
+  testImplementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.15.1")
+  testImplementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.15.1")
+
   testImplementation("org.awaitility:awaitility:4.2.0")
   testImplementation("org.junit.jupiter:junit-jupiter:5.9.2")
   testImplementation("io.rest-assured:rest-assured:5.3.0")
