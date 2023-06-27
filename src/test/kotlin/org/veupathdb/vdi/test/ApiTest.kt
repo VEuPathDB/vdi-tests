@@ -84,7 +84,7 @@ class ApiTest {
         DatasetsToClean.add(datasetID)
         logger().info("Issued datasetID: $datasetID")
 
-        awaitImportStatus(datasetID, if (input.expectation == Expectation.FAILED_IMPORT) "failed-import" else "complete")
+        awaitImportStatus(datasetID, if (input.expectation == Expectation.FAILED_IMPORT) "invalid" else "complete")
 
         if (input.expectation != Expectation.FAILED_IMPORT)
             awaitInstallStatus(datasetID, if (input.expectation == Expectation.FAILED_INSTALL) "failed-installation" else "complete")

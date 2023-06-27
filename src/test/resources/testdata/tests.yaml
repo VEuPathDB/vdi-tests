@@ -13,3 +13,13 @@ tests: # These tests are modeled by the TestCase data object. All paths are rela
   project: PlasmoDB
   expectation: failed_install
   type: isasimple
+
+- path: rnaseq/invalid.zip
+  project: PlasmoDB
+  expectation: failed_import
+  type: rnaseq
+
+- path: rnaseq/valid.zip
+  project: PlasmoDB
+  expectation: success
+  type: rnaseq
