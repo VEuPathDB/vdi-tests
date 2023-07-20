@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+
+import sys
+sys.path.insert(0, "/opt/veupathdb/lib/python")
+from Migrator import Migrator
+
+
+def usage():
+    msg = """
+Migrate user datasets from the iRODs UD system to VDI.
+
+Usage:  migrate tiny_db_json_file ud_service_url ud_admin_login ud_admin_pws vdi_service_url vdi_admin_login vdi_admin_pwd <projects...>
+
+"""
+    print(msg, file=sys.stderr)
+    sys.exit(2)
+
+def main():
+    if len(sys.argv) < 7:
+        usage()
+    importer = BiomImporter()
+    importer.importBiom(sys.argv[1], sys.argv[2])
+
+if __name__ == "__main__":
+    sys.exit(main())
+
+
+
+
+this script will
+
+1. be written in python
+2. have cmd line args:
+  - `--projects` - limit to UDs from these projects.  default is no limit
+  - `--ud_service_url`
+  - `--ud_admin_login`
+  - `--ud_admin_pwd`
+  - `--vdi_service_url`
+  - `--vdi_admin_login`
+  - `--vdi_admin_pwd`
+  - `--tinydb_json_file`
+3. 
+
