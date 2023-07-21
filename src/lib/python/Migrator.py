@@ -4,7 +4,7 @@ import requests
 import json
 from tinydb import TinyDB, Query
 from datetime import datetime
-import urllib2
+import urllib
 
 """
 - Maintains a private mapping of UD IDs to VDI IDs, using python's tinydb as storage system.
@@ -138,7 +138,7 @@ class Migrator():
             return dataFileNames
         else:
             print("Unexpected UD type: " + udType, file=sys.stderr)
-            exit 1;
+            exit(1)
         return False
 
     def printBumUd(udId, udType, dataFileNames):
@@ -148,17 +148,17 @@ class Migrator():
     def downloadFiles(fileNames, userId, udId, downloadDir, udServiceUrl, udHeaders):
         for fileName in fileNames:
             try:
-                request = urllib2.request((udServiceUrl + "/users/current/user-datasets/admin/" + userId + "/" + udId + "/user-datafiles/" + fileName,
+                request = urllib.request.Request(udServiceUrl + "/users/current/user-datasets/admin/" + userId + "/" + udId + "/user-datafiles/" + fileName,
                                            None,
                                            udHeaders)
-                response = urllib2.urlopen(request)
+                response = urllib.request.urlopen(request)
                 data = response.read()
                 file_ = open(downloadDir + "/" + filename, 'w')
                 file_.write(data)
                 file_.close()
-                except Exception as e:
-                    print("Died trying to download from UD service" + e.message, file=sys.stderr)
-                    exit 1
+            except Exception as e:
+                print("Died trying to download from UD service" + e.message, file=sys.stderr)
+                exit(1)
 
     def createTarball(temp_path):
         with tarfile.open("happy.tgz", "w:gz") as tarball:
