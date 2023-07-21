@@ -24,6 +24,8 @@ POLLING_TIMEOUT = 10 * POLLING_INTERVAL_MAX
 ORIGIN = "standard" # indicate to the service that Galaxy is the point of origin for this user dataset.
 ORIGINATING_USER_HEADER_KEY = "originating-user-id"
 
+SSL_VERIFY = False
+
 # types
 GENE_LIST = "GeneList"
 RNA_SEQ = "RNASeq"
@@ -34,7 +36,7 @@ BIGWIG = "BigWig"
 class Migrator():
 
 
-    def migrate(self, tinyDbJsonFile, udServiceUrl, udAdminUserId, udAdminToken, vdiServiceUrl, vdiAdminUserId, vdiAdminToken, targetProject):
+    def migrate(self, tinyDbJsonFile, udServiceUrl, udAdminUserId, udAdminToken, vdiServiceUrl, vdiAdminUserId, vdiAdminToken, *targetProjects):
 
         UD_HEADERS = {"Accept": "application/json", "Auth-Key": udAdminToken, "originating-user-id": udAdminUserId}
         VDI_HEADERS = {"Accept": "application/json", "Auth-Key": vdiAdminToken, "originating-user-id": vdiAdminUserId}     
@@ -48,15 +50,17 @@ class Migrator():
         """
         tinyDb = TinyDB(tinyDbJsonFile)
 
+        a = [tinyDbJsonFile, udServiceUrl, udAdminUserId, udAdminToken, vdiServiceUrl, vdiAdminUserId, vdiAdminToken]
+        print("happy: " + ', '.join(a), file=sys.stderr)
         # first pass: for UD owner
-        response = requests.get(udServiceUrl + "/users/current/all-user-datasets", headers=UD_HEADERS, verify=get_ssl_verify())
+        response = requests.get(udServiceUrl + "/users/current/all-user-datasets", headers=UD_HEADERS, verify=SSL_VERIFY)
         response.raise_for_status()
         json_blob = response.json()
         udJson = json.load(json_blob)
         for ud in jdJson:
             udId = udJson["id"]
             udUserId = udJson["userId"]            
-            if targetProject != "all" and ud["projects"][0] != targetProject:
+            if len(targetProjects) != 0 and ud["projects"][0] not in targetProjects:
                 continue
             if udJson["ownerUserId"] != userId:
                 continue
@@ -74,14 +78,14 @@ class Migrator():
             writeOwnerUdToTinyDb(udId, vdiId, invalidMessage)
 
         # second pass for share recipients    
-        response = requests.get(udServiceUrl + "/current/all-user-datasets", headers=UD_HEADERS, verify=get_ssl_verify())
+        response = requests.get(udServiceUrl + "/current/all-user-datasets", headers=UD_HEADERS, verify=SSL_VERIFY)
         response.raise_for_status()
         json_blob = response.json()
         udJson = json.load(json_blob)
         for ud in jdJson:
             udId = udJson["id"]
             udUserId = udJson["userId"]  # recipient ID
-            if targetProject != "all" and ud["projects"][0] != targetProject:
+            if len(targetProjects) != 0 and ud["projects"][0] not in targetProjects:
                 continue
             if udJson["ownerUserId"] == userId:
                 continue
@@ -181,7 +185,7 @@ class Migrator():
         print_debug("POSTING data.  Tarball name: " + tarball_name)
         try:
             form_fields = {"file": open(tarball_name, "rb"), "uploadMethod":"file"}
-            response = requests.post(vdiServiceUrl + "/vdi-datasets", json = json_blob, files=form_fields, headers=vdi_headers, verify=get_ssl_verify())
+            response = requests.post(vdiServiceUrl + "/vdi-datasets", json = json_blob, files=form_fields, headers=vdi_headers, verify=SSL_VERIFY)
             response.raise_for_status()
             print_debug(response.json())
             return response.json()['jobId']
@@ -209,7 +213,7 @@ class Migrator():
     def checkUploadInprogress(vdiServiceUrl, vdiId, vdiHeaders):
         print_debug("Polling for status")
         try:
-            response = requests.get(vdiServiceUrl + "/vdi-datasets/" + vdiId, headers=vdiHeaders, verify=get_ssl_verify())
+            response = requests.get(vdiServiceUrl + "/vdi-datasets/" + vdiId, headers=vdiHeaders, verify=SSL_VERIFY)
             response.raise_for_status()
             json_blob = response.json()
             message = None
@@ -235,7 +239,7 @@ class Migrator():
         jsonBody = {"action": "grant"}                                  
         for recipientId in udJson["sharedWith"]:                             
             try:
-                response = requests.put(vdiServiceUrl + "/vdi-datasets/" + vdiId + "/shares/" + recipientId + "/offer", json = jsonBody, headers=vdiHeaders, verify=get_ssl_verify())
+                response = requests.put(vdiServiceUrl + "/vdi-datasets/" + vdiId + "/shares/" + recipientId + "/offer", json = jsonBody, headers=vdiHeaders, verify=SSL_VERIFY())
                 response.raise_for_status()
             except Exception as e:
                 print("Http Error (" + str(response.status_code) + "): " + str(e), file=sys.stderr)            
@@ -246,7 +250,7 @@ class Migrator():
     def putShareReciept(vdId, recipientId, vdiServiceUrl, vdiHeaders):
         jsonBody = {"action": "accept"}                                  
         try:
-            response = requests.put(vdiServiceUrl + "/vdi-datasets/" + vdiId + "/shares/" + recipientId + "/receipt", json = jsonBody, headers=vdiHeaders, verify=get_ssl_verify())
+            response = requests.put(vdiServiceUrl + "/vdi-datasets/" + vdiId + "/shares/" + recipientId + "/receipt", json = jsonBody, headers=vdiHeaders, verify=SSL_VERIFY())
             response.raise_for_status()
         except Exception as e:
             print("Http Error (" + str(response.status_code) + "): " + str(e), file=sys.stderr)            
