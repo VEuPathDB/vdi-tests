@@ -9,7 +9,7 @@ def usage():
     msg = """
 Migrate user datasets from the iRODs UD system to VDI.
 
-Usage:  migrate tiny_db_json_file ud_service_url ud_admin_login ud_admin_pws vdi_service_url vdi_admin_login vdi_admin_pwd num_limit <projects...>
+Usage:  migrate tiny_db_json_file work_dir ud_service_url vdi_service_url vdi_admin_login vdi_admin_pwd count_limit <projects...>
 
 If projects is empty, then do all projects
 
@@ -18,7 +18,7 @@ If projects is empty, then do all projects
     sys.exit(2)
 
 def main():
-    if len(sys.argv) < 7:
+    if len(sys.argv) < 8:
         usage()
     migrator = Migrator()
     myArgs = sys.argv
