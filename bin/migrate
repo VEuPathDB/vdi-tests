@@ -11,6 +11,8 @@ Migrate user datasets from the iRODs UD system to VDI.
 
 Usage:  migrate tiny_db_json_file work_dir ud_service_url vdi_service_url vdi_admin_login vdi_admin_pwd count_limit <projects...>
 
+Environment: UD_AUTH_TKT is the value of the auth_tkt
+
 If projects is empty, then do all projects
 
 """

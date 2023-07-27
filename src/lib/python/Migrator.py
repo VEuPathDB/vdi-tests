@@ -34,7 +34,7 @@ BIOM = "BIOM"
 ISA = "ISA"
 BIGWIG = "BigwigFiles"
 
-authTkt = "auth_tkt=NjNhOWRmMGNiMDY3MWVhMzc2ZTA5YTAwNzUxM2NmYzU2NGMxOGNhYWFwaWRiIWFwaWRiITE2OTAzMDAyNTI6"
+print("authTkt: " + authTkt, file=sys.stderr)
 
 class Migrator():
 
