@@ -112,9 +112,6 @@ class Migrator():
 
         # second pass for share recipients    
         try:
-            response = requests.get(udServiceUrl + "/users/current/all-user-datasets", headers=UD_HEADERS, verify=SSL_VERIFY)
-            response.raise_for_status()
-            udsJson = response.json()
             for udJson in udsJson:
                 udId = udJson["id"]
                 udUserId = udJson["userId"]  # recipient ID
