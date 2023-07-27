@@ -5,6 +5,8 @@ import json
 from tinydb import TinyDB, Query
 from datetime import datetime
 import urllib
+import os
+import tarfile
 
 """
 - Maintains a private mapping of UD IDs to VDI IDs, using python's tinydb as storage system.
@@ -31,14 +33,15 @@ GENE_LIST = "GeneList"
 RNA_SEQ = "RNASeq"
 BIOM = "BIOM"
 ISA = "ISA"
-BIGWIG = "BigWig"
+BIGWIG = "BigwigFiles"
 
 class Migrator():
 
 
-    def migrate(self, tinyDbJsonFile, udServiceUrl, udAdminUserId, udAdminToken, vdiServiceUrl, vdiAdminUserId, vdiAdminToken, *targetProjects):
+    def migrate(self, tinyDbJsonFile, udServiceUrl, vdiServiceUrl, vdiAdminUserId, vdiAdminToken, countLimit, *targetProjects):
 
-        UD_HEADERS = {"Accept": "application/json", "Auth-Key": udAdminToken, "originating-user-id": udAdminUserId, "Cookie": "auth_tkt=YmE5ZjI1OTVmNzEzMzk5MzhjZjU4ODhiMjI1NzUwOWM2NGI5NzhjYmFwaWRiIWFwaWRiITE2ODk4NzY2ODM6"}
+        UD_HEADERS = {"Accept": "application/json", "Auth-Key": "dontcare", "originating-user-id": "dontcare", "Cookie": "auth_tkt=ZTcxOWFlNGQyYzgzN2E1M2ExN2QzMDg4MTdmNDNlYTk2NGJmZWY1Y2FwaWRiIWFwaWRiITE2OTAzMDAyNTI6"}
+        UD_HEADERS_FILE = {"Auth-Key": "dontcare", "originating-user-id": "dontcare", "Cookie": "auth_tkt=ZTcxOWFlNGQyYzgzN2E1M2ExN2QzMDg4MTdmNDNlYTk2NGJmZWY1Y2FwaWRiIWFwaWRiITE2OTAzMDAyNTI6"}
         VDI_HEADERS = {"Accept": "application/json", "Auth-Key": vdiAdminToken, "originating-user-id": vdiAdminUserId}     
 
         """
@@ -50,7 +53,7 @@ class Migrator():
         """
         tinyDb = TinyDB(tinyDbJsonFile)
 
-        a = [tinyDbJsonFile, udServiceUrl, udAdminUserId, udAdminToken, vdiServiceUrl, vdiAdminUserId, vdiAdminToken]
+        a = [tinyDbJsonFile, udServiceUrl, vdiServiceUrl, vdiAdminUserId, vdiAdminToken]
         print("happy: " + ', '.join(a), file=sys.stderr)
         # first pass: for UD owner
         alreadyMigrated(tinyDb, 34)
@@ -59,24 +62,29 @@ class Migrator():
             response = requests.get(udServiceUrl + "/users/current/all-user-datasets", headers=UD_HEADERS, verify=SSL_VERIFY)
             response.raise_for_status()
             udsJson = response.json()
+            print("Proj: " + str(targetProjects), file=sys.stderr)
+            count = 0
             for udJson in udsJson:
+                if count > int(countLimit):
+                    break
+                count += 1
                 udId = udJson["id"]
-                udUserId = udJson["userId"]            
+                udUserId = int(udJson["userId"])            
                 if len(udJson["projects"]) == 0:
                     print("Ignoring UD " + str(udId) + " NO PROJECT", file=sys.stderr)
                     continue
                 if len(targetProjects) != 0 and udJson["projects"][0] not in targetProjects:
                     print("Ignoring UD " + str(udId) + " from project: " + udJson["projects"][0], file=sys.stderr)
                     continue
-                if udJson["ownerUserId"] != userId:
+                if udJson["ownerUserId"] != udUserId:
                     continue
                 if alreadyMigrated(tinyDb, udId):
                     print("Skipping UD.  Already migrated: " + str(udId), file=sys.stderr)
                     continue
                 print("Migrating UD: " + str(udId), file=sys.stderr)
-                importFileNames = findFilesToMigrate(udJson["datafiles"], udJson["type"]["name"])
+                importFileNames = findFilesToMigrate(udId, udJson["type"]["name"], udJson["datafiles"])
                 downloadDir = createTmpDir("download")
-                downloadFiles(importFileNames, userId, udId, downloadDir, udServiceUrl, UD_HEADERS)
+                downloadFiles(importFileNames, udUserId, udId, downloadDir, udServiceUrl, UD_HEADERS_FILE)
                 tarballName = createTarball(downloadDir)
                 postBody = createBodyForPost(udJson)
                 vdiId = postMetadataAndData(vdiServiceUrl, postBody, tarballName, VDI_HEADERS)
@@ -84,12 +92,13 @@ class Migrator():
                 invalidMessage = pollForUploadComplete(vdiId, VDI_HEADERS)   # teriminates if system  error
                 putShareOffers(vdId, udJson, vdiServiceUrl, VDI_HEADERS)
                 writeOwnerUdToTinyDb(udId, vdiId, invalidMessage)
+#        except Exception as e:
         except NameError as e:
             print("POST failed. Code: " + str(response.status_code) + " " + str(e), file=sys.stderr)            
 #            print("Reason: " + response.text, file=sys.stderr)
             sys.exit(1)
         print("DONE WITH FIRST PASS", file=sys.stderr)
-        
+        sys.exit(1)
         # second pass for share recipients    
         try:
             response = requests.get(udServiceUrl + "/users/current/all-user-datasets", headers=UD_HEADERS, verify=SSL_VERIFY)
@@ -129,6 +138,36 @@ def alreadyShared(tinyDB, udId, userId):
     Record = Query()
     return len(tinyDb.search((Record.type == 'recipient') & (Record.udId == udId) & (Record.recipientUserId == userId) )) > 0         
 
+# return None if the files look weird
+def findFilesToMigrate(udId, udType, dataFileInfos):
+    dataFileNames = list(map(lambda dataFileInfo: dataFileInfo["name"], dataFileInfos))
+    if type == GENE_LIST:
+        if len(dataFileNames) != 1 or dataFileNames[0] != "genelist.txt":
+            printBumUd(udId, udType, dataFileNames)
+            return None
+        return dataFileNames
+    elif udType == RNA_SEQ:
+        if len(dataFileNames) < 1 or not "manifest.txt" in dataFileNames:
+            printBumUd(udId, udType, dataFileNames)
+            return None
+        return dataFileNames
+    elif udType == BIOM:
+        filtered = filter(lambda file: not (re.search('*.tsv', file) or re.search('*.json', file)), dataFileNames)
+        if len(filtered) != 1:
+            printBumUd(udId, udType, dataFileNames)
+            return None
+        return filtered
+    elif udType ==  ISA:
+        return dataFileNames
+    elif udType == BIGWIG:
+        return dataFileNames
+    else:
+        print("Unexpected UD type: " + udType, file=sys.stderr)
+        exit(1)
+
+def printBumUd(udId, udType, dataFileNames):
+    print("BUM UD: " + udId + "\t" + udType + "\t" + ', '.join(dataFileNames), file=sys.stdout)
+
 def createTmpDir(dirName):
     # clear out dir if exists
     if os.path.exists(dirName):
@@ -136,58 +175,35 @@ def createTmpDir(dirName):
             os.remove(dirName + "/" + file)            
     else:    
         os.makedirs(dirName)
-
-# return None if the files look weird
-def findFilesToMigrate(udId, udType, dataFileNames):
-    if type == GENE_LIST:
-        if len(dataFileNames) != 1 or dataFileNames[0] != "genelist.txt":
-            printBumUd(udId, udType, dataFileNames)
-            return None
-        return dataFileNames
-    elif type == RNA_SEQ:
-        if len(dataFileNames) < 1 or not "manifest.txt" in dataFileNames:
-            printBumUd(udId, udType, dataFileNames)
-            return None
-        return dataFileNames
-    elif type == BIOM:
-        filtered = filter(lambda file: not (re.search('*.tsv', file) or re.search('*.json', file)), dataFileNames)
-        if len(filtered) != 1:
-            printBumUd(udId, udType, dataFileNames)
-            return None
-        return filtered
-    elif type ==  ISA:
-        return dataFileNames
-    elif type == BIGWIG:
-        return dataFileNames
-    else:
-        print("Unexpected UD type: " + udType, file=sys.stderr)
-        exit(1)
-    return False
-
-def printBumUd(udId, udType, dataFileNames):
-    print("BUM UD: " + udId + "\t" + udType + "\t" + ', '.join(dataFileNames), file=sys.stdout)
-
+    return dirName    
+        
 # https://dgaldi.plasmodb.org/plasmo.dgaldi/service/users/current/user-datasets/admin/{user-id}/{dataset-id}/user-datafiles/{filename}    
 def downloadFiles(fileNames, userId, udId, downloadDir, udServiceUrl, udHeaders):
+    print ("Download files: " + ', '.join(fileNames), file=sys.stderr)
     for fileName in fileNames:
         try:
-            request = urllib.request.Request(udServiceUrl + "/users/current/user-datasets/admin/" + userId + "/" + udId + "/user-datafiles/" + fileName,
-                                             None,
-                                             udHeaders)
+            url = udServiceUrl + "/users/current/user-datasets/admin/" + str(userId) + "/" + str(udId) + "/user-datafiles/" + fileName
+            print("URL: " + url + " " + str(udHeaders), file=sys.stderr)
+            request = urllib.request.Request(url, None, udHeaders)
             response = urllib.request.urlopen(request)
             data = response.read()
-            file_ = open(downloadDir + "/" + filename, 'w')
+            file_ = open(downloadDir + "/" + fileName, 'wb')
             file_.write(data)
             file_.close()
-        except Exception as e:
-            print("Died trying to download from UD service" + e.message, file=sys.stderr)
-            exit(1)
+        except urllib.error.HTTPError as e:
+           print("Died trying to download from UD service " + e.code + " " + e.reason, file=sys.stderr)
+           exit(1)
+            
+#        except NameError as e:
+#           print("Died trying to download from UD service " + e.message, file=sys.stderr)
+#           exit(1)
 
-def createTarball(temp_path):
+def createTarball(dirpath):
+    print("dirpath " + str(dirpath), file=sys.stderr)
     with tarfile.open("happy.tgz", "w:gz") as tarball:
-        for filename in os.listdir(temp_path):
-            print_debug("Adding file to tarball: " + filename)
-            tarball.add(filename)
+        for filename in os.listdir(dirpath):
+            print("Adding file to tarball: " + filename, file=sys.stderr)
+            tarball.add(dirpath + "/" + filename)
     return "happy.tgz"
 
 def createBodyForPost(udJson):
