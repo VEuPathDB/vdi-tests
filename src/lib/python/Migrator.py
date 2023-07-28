@@ -34,6 +34,8 @@ BIOM = "BIOM"
 ISA = "ISA"
 BIGWIG = "BigwigFiles"
 
+authTkt = "auth_tkt=" + os.environ["UD_AUTH_TKT"]
+
 print("authTkt: " + authTkt, file=sys.stderr)
 
 class Migrator():
