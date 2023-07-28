@@ -109,29 +109,34 @@ class Migrator():
             print("URL: " + url, file=sys.stderr)            
 #            print("Reason: " + response.text, file=sys.stderr)
             sys.exit(1)
-        print("DONE WITH FIRST PASS. Uploaded: " + str(count-1) + " Already migrated: " + str(alreadyCount) + " Ignored: " + str(ignoreCount), file=sys.stderr)
-        sys.exit(1)
+        print("DONE WITH FIRST PASS. Uploaded: " + str(count) + " Already migrated: " + str(alreadyCount) + " Ignored: " + str(ignoreCount), file=sys.stderr)
+
 
         # second pass for share recipients    
-        try:
-            for udJson in udsJson:
-                udId = udJson["id"]
-                udUserId = udJson["userId"]  # recipient ID
-                if udJson["ownerUserId"] == udUserId:
-                    continue
-                if not alreadyMigrated(tinyDb, udId):
-                    print("Skipping UD share.  Not migrated yet: " + str(udId), file=sys.stderr)
-                    continue
-                if alreadyShared(tinyDb, udId, udUserId):
-                    print("Skipping UD share.  Already shared: " + str(udId), file=sys.stderr)
-                    continue
-                vdiId = putShareReceipt(vdiId, udUserId, vdiServiceUrl, VDI_HEADERS)
-                writeRecipientUdToTinyDb(tinyDb, udId, vdiId, udUserId)
-        except Exception as e:
-            print("POST failed. Code: " + str(response.status_code) + " " + str(e), file=sys.stderr)            
-    #        print("Reason: " + response.text, file=sys.stderr)
-            sys.exit(1)
-            
+        shareCount = 0;
+        for udJson in udsJson:
+            udId = udJson["id"]
+            udUserId = udJson["userId"]  # recipient ID
+            if udJson["ownerUserId"] == udUserId:
+                continue
+            if not alreadyMigrated(tinyDb, udId):
+                print("Skipping UD share.  Not migrated yet: " + str(udId), file=sys.stderr)
+                continue
+            if alreadyShared(tinyDb, udId, udUserId):
+                print("Skipping UD share.  Already shared: " + str(udId), file=sys.stderr)
+                continue
+            try:
+                #putShareReceipt(vdiId, udUserId, vdiServiceUrl, VDI_HEADERS)
+                silly = 1
+            except Exception as e:
+                print("POST failed. Code: " + str(response.status_code) + " " + str(e), file=sys.stderr)            
+                #        print("Reason: " + response.text, file=sys.stderr)
+                sys.exit(1)
+            writeRecipientUdToTinyDb(tinyDb, udId, vdiId, udUserId)
+            shareCount += 1
+        print("DONE WITH SECOND PASS", file=sys.stderr)
+        print("SUMMARY  Shared: " + str(shareCount) + "  Uploaded: " + str(count) + " Already migrated: " + str(alreadyCount) + " Ignored: " + str(ignoreCount), file=sys.stderr)
+
 def writeOwnerUdToTinyDb(tinyDb, udId, vdiId, invalidMessage):
     t = datetime.now();
     tinyDb.insert({'type': 'owner', 'udId': udId, 'vdiId': vdiId, 'msg': invalidMessage, 'time': t.ctime()})
@@ -145,7 +150,7 @@ def alreadyMigrated(tinyDb, udId):
     #print("Tiny: " + str(tinyDb.search((Record.type == 'owner') & (Record.udId == udId))))
     return len(tinyDb.search((Record.type == 'owner') & (Record.udId == udId))) > 0
 
-def alreadyShared(tinyDB, udId, userId):
+def alreadyShared(tinyDb, udId, userId):
     Record = Query()
     return len(tinyDb.search((Record.type == 'recipient') & (Record.udId == udId) & (Record.recipientUserId == userId) )) > 0         
 
@@ -289,11 +294,12 @@ def putShareOffers(vdId, udJson, vdiServiceUrl, vdiHeaders):
                 print("Reason: " + response.text, file=sys.stderr)
                 sys.exit(1)
 
-def putShareReciept(vdId, recipientId, vdiServiceUrl, vdiHeaders):
+def putShareReciept(vdiId, recipientId, vdiServiceUrl, vdiHeaders):
     jsonBody = {"action": "accept"}                                  
     try:
         response = requests.put(vdiServiceUrl + "/vdi-datasets/" + vdiId + "/shares/" + recipientId + "/receipt", json = jsonBody, headers=vdiHeaders, verify=SSL_VERIFY())
         response.raise_for_status()
+        print("Shared receipt.  Owner: " + vdiId + " Recipient: " + recipientId, file=sys.stderr)
     except Exception as e:
         print("Http Error (" + str(response.status_code) + "): " + str(e), file=sys.stderr)            
         if response != None:
