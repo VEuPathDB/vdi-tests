@@ -40,12 +40,11 @@ print("authTkt: " + authTkt, file=sys.stderr)
 
 class Migrator():
 
-
-    def migrate(self, tinyDbJsonFile, workingDir, udServiceUrl, vdiServiceUrl, vdiAdminUserId, vdiAdminToken, countLimit, *targetProjects):
+    def migrate(self, tinyDbJsonFile, workingDir, udServiceUrl, vdiServiceUrl, vdiAdminAuthKey, countLimit, *targetProjects):
         
         UD_HEADERS = {"Accept": "application/json", "Auth-Key": "dontcare", "originating-user-id": "dontcare", "Cookie": authTkt}
         UD_HEADERS_FILE = {"Auth-Key": "dontcare", "originating-user-id": "dontcare", "Cookie": authTkt}
-        VDI_HEADERS = {"Accept": "application/json", "Auth-Key": vdiAdminToken, "originating-user-id": vdiAdminUserId}     
+        VDI_HEADERS = {"Accept": "application/json", "Auth-Key": vdiAdminAuthKey, "User-ID": "?"} 
 
         """
           In TinyDB we'll have two types of records.  Here are examples:
@@ -57,58 +56,62 @@ class Migrator():
 
         tinyDb = TinyDB(tinyDbJsonFile)
 
-        a = [tinyDbJsonFile, workingDir, udServiceUrl, vdiServiceUrl, vdiAdminUserId, vdiAdminToken, countLimit, str(targetProjects)]
+        a = [tinyDbJsonFile, workingDir, udServiceUrl, vdiServiceUrl, vdiAdminAuthKey, countLimit, str(targetProjects)]
         print("cmdline args: " + ', '.join(a), file=sys.stderr)
+
+        vdiDatasetsUrl = vdiServiceUrl + "/vdi-datasets"
         
-        # first pass: for UD owner
+        # first pass: for UD owner.  Get json with all UDs.  Then iterate.
+        udsJson = ""
         try:
             url = udServiceUrl + "/users/current/all-user-datasets"
             response = requests.get(url, headers=UD_HEADERS, verify=SSL_VERIFY)
             response.raise_for_status()
             udsJson = response.json()
-            print("Proj: " + str(targetProjects), file=sys.stderr)
-            count = 0
-            alreadyCount = 0
-            ignoreCount = 0
-            for udJson in udsJson:
-                udId = udJson["id"]
-                udUserId = int(udJson["userId"])            
-                if len(udJson["projects"]) == 0:
-                    print("Ignoring UD " + str(udId) + " NO PROJECT", file=sys.stderr)
-                    ignoreCount += 1
-                    continue
-                if len(targetProjects) != 0 and udJson["projects"][0] not in targetProjects:
-                    print("Ignoring UD " + str(udId) + " from project: " + udJson["projects"][0], file=sys.stderr)
-                    ignoreCount += 1
-                    continue
-                if udJson["ownerUserId"] != udUserId:
-                    continue
-                if alreadyMigrated(tinyDb, udId):
-                    print("Skipping UD.  Already migrated: " + str(udId), file=sys.stderr)
-                    alreadyCount += 1
-                    continue
-                if count >= int(countLimit):
-                    break
-                count += 1
-                print("Migrating UD: " + str(udId) + " " + udJson["projects"][0] + " " + udJson["type"]["name"], file=sys.stderr)
-                importFileNames = findFilesToMigrate(udId, udJson["type"]["name"], udJson["datafiles"])
-                downloadDir = createDownloadDir(workingDir + "/download")
-                downloadFiles(importFileNames, udUserId, udId, downloadDir, udServiceUrl, UD_HEADERS_FILE)
-                tarballName = workingDir + "/happy.tgz"
-                createTarball(downloadDir, tarballName)
-                postBody = createBodyForPost(udJson)
-#                vdiId = postMetadataAndData(vdiServiceUrl, postBody, tarballName, VDI_HEADERS)
-#                print("VDI ID: " + vdiId, file=sys.stderr)
-#                invalidMessage = pollForUploadComplete(vdiId, VDI_HEADERS)   # teriminates if system  error
-#                putShareOffers(vdId, udJson, vdiServiceUrl, VDI_HEADERS)
-                vdiId = "vdi-" + str(udId)
-                invalidMessage = None
-                writeOwnerUdToTinyDb(tinyDb, udId, vdiId, invalidMessage)
-        except Exception as e:
-            print("Http Error (" + str(response.status_code) + "): " + str(e), file=sys.stderr)            
-            print("URL: " + url, file=sys.stderr)            
-#            print("Reason: " + response.text, file=sys.stderr)
-            sys.exit(1)
+            response.close()
+        except requests.exceptions.RequestException as e:
+            handleRequestException(e, url, "Posting metadata and data to VDI")    
+        
+        print("Proj: " + str(targetProjects), file=sys.stderr)
+        count = 0
+        alreadyCount = 0
+        ignoreCount = 0
+        for udJson in udsJson:
+            udId = udJson["id"]
+            udUserId = int(udJson["userId"])            
+            if len(udJson["projects"]) == 0:
+                print("Ignoring UD " + str(udId) + " NO PROJECT", file=sys.stderr)
+                ignoreCount += 1
+                continue
+            if len(targetProjects) != 0 and udJson["projects"][0] not in targetProjects:
+                print("Ignoring UD " + str(udId) + " from project: " + udJson["projects"][0], file=sys.stderr)
+                ignoreCount += 1
+                continue
+            if udJson["ownerUserId"] != udUserId:
+                continue
+            if alreadyMigrated(tinyDb, udId):
+                print("Skipping UD.  Already migrated: " + str(udId), file=sys.stderr)
+                alreadyCount += 1
+                continue
+            if count >= int(countLimit):
+                break
+            count += 1
+            print("Migrating UD: " + str(udId) + " " + udJson["projects"][0] + " " + udJson["type"]["name"], file=sys.stderr)
+            importFileNames = findFilesToMigrate(udId, udJson["type"]["name"], udJson["datafiles"])
+            downloadDir = createDownloadDir(workingDir + "/download")
+            downloadFiles(importFileNames, udUserId, udId, downloadDir, udServiceUrl, UD_HEADERS_FILE)
+            tarballName = workingDir + "/happy.tgz"
+            createTarball(downloadDir, tarballName)
+            postBody = createBodyForPost(udJson)
+            vdiHeaders = VDI_HEADERS
+            vdiHeaders["User-ID"] = str(udUserId)
+            vdiId = postMetadataAndData(vdiDatasetsUrl, postBody, tarballName, vdiHeaders)
+            invalidMessage = pollForUploadComplete(vdiId, vdiHeaders)   # teriminates if system  error
+            putShareOffers(vdId, udJson, vdiDatasetsUrl, vdiHeaders)
+            vdiId = "vdi-" + str(udId)
+            invalidMessage = None
+            writeOwnerUdToTinyDb(tinyDb, udId, vdiId, invalidMessage)
+
         print("DONE WITH FIRST PASS. Uploaded: " + str(count) + " Already migrated: " + str(alreadyCount) + " Ignored: " + str(ignoreCount), file=sys.stderr)
 
 
@@ -126,12 +129,14 @@ class Migrator():
                 print("Skipping UD share.  Already shared: " + str(udId), file=sys.stderr)
                 continue
             try:
-                #putShareReceipt(vdiId, udUserId, vdiServiceUrl, VDI_HEADERS)
+                vdiHeaders = VDI_HEADERS
+                vdiHeaders["User-ID"] = str(udUserId)
+                putShareReceipt(vdiId, udUserId, vdiDatasetsUrl, vdiHeaders)
                 silly = 1
             except Exception as e:
                 print("POST failed. Code: " + str(response.status_code) + " " + str(e), file=sys.stderr)            
                 #        print("Reason: " + response.text, file=sys.stderr)
-                sys.exit(1)
+                exit(1)
             writeRecipientUdToTinyDb(tinyDb, udId, vdiId, udUserId)
             shareCount += 1
         print("DONE WITH SECOND PASS", file=sys.stderr)
@@ -207,7 +212,7 @@ def downloadFiles(fileNames, userId, udId, downloadDir, udServiceUrl, udHeaders)
             file_.close()
             response.close()
         except urllib.error.HTTPError as e:
-           print("Died trying to download from UD service " + e.code + " " + e.reason, file=sys.stderr)
+           print("Died trying to download from UD service: " + str(e.code)  + " " + e.reason, file=sys.stderr)
            exit(1)
 
 def createTarball(dirpath, tarFileName):
@@ -223,24 +228,38 @@ def createBodyForPost(udJson):
     origin = "direct-upload"
     if udJson["type"]["name"] == "BigwigFiles" or udJson["type"]["name"] == "RnaSeq":
         origin = "galaxy"
+    dependencies = udJson["dependencies"].copy()
+    print("depends: " + str(dependencies), file=sys.stderr)
+    for dependency in dependencies:
+        if dependency["compatibilityInfo"] is not None:
+            print("Found non-null compatibilityInfo: " + str(dependency["compatibilityInfo"]), file=sys.stderr)
+         #   exit(1)
+        del dependency["compatibilityInfo"]
     return {
-        "datasetName": udJson["meta"]["name"],
+        "name": udJson["meta"]["name"],
         "summary": udJson["meta"]["summary"],
+        "dependencies": dependencies,
         "description": udJson["meta"]["description"],
         "datasetType": {"name": udJson["type"]["name"], "version": udJson["type"]["version"]},
         "projects": udJson["projects"],
+        "visibility": "private",
         "origin": origin
     }
 
-def postMetadataAndData(vdiServiceUrl, json_blob, tarball_name, vdi_headers):
+def postMetadataAndData(vdiDatasetsUrl, json_blob, tarball_name, vdi_headers):
     try:
-        form_fields = {"file": open(tarball_name, "rb"), "uploadMethod":"file"}
-        response = requests.post(vdiServiceUrl + "/vdi-datasets", json = json_blob, files=form_fields, headers=vdi_headers, verify=SSL_VERIFY)
+        url = vdiDatasetsUrl + "/admin/proxy-upload"
+        print("Posting to VDI: " + url, file=sys.stderr)
+        print("JSON: " + str(json_blob), file=sys.stderr)
+        print("Head: " + str(vdi_headers), file=sys.stderr)
+        form_fields = {"file": open(tarball_name, "rb"), "meta":json.dumps(json_blob)}
+        response = requests.post(url, files=form_fields, headers=vdi_headers, verify=SSL_VERIFY)
         response.raise_for_status()
-        return response.json()['jobId']
-    except urllib.error.HTTPError as e:
-        print("Died trying to download from UD service " + e.code + " " + e.reason, file=sys.stderr)
-        sys.exit(1)
+        jobId = response.json()['jobId']
+        response.close()
+        return jobId
+    except requests.exceptions.RequestException as e:
+        handleRequestException(e, url, "Posting metadata and data to VDI")    
 
 def pollForUploadComplete(vdiId, vdiHeaders):
     start_time = time.time()
@@ -254,13 +273,14 @@ def pollForUploadComplete(vdiId, vdiHeaders):
             poll_interval_seconds *= POLLING_FACTOR
         if (time.time() - start_time > POLLING_TIMEOUT):
             print("Timed out polling for upload completion status", file=sys.stderr)
-            sys.exit(1)
+            exit(1)
         
 # return True if still in progress; False if success.  Fail and terminate if system or validation error
-def checkUploadInprogress(vdiServiceUrl, vdiId, vdiHeaders):
+def checkUploadInprogress(vdiDatasetsUrl, vdiId, vdiHeaders):
     print_debug("Polling for status")
     try:
-        response = requests.get(vdiServiceUrl + "/vdi-datasets/" + vdiId, headers=vdiHeaders, verify=SSL_VERIFY)
+        url = vdiServiceUrl + "/" + vdiId
+        response = requests.get(url, headers=vdiHeaders, verify=SSL_VERIFY)
         response.raise_for_status()
         json_blob = response.json()
         message = None
@@ -269,11 +289,8 @@ def checkUploadInprogress(vdiServiceUrl, vdiId, vdiHeaders):
         if json_blob["status"]["import"] == "invalid":
             return (True, handle_job_invalid_status(json_blob))
         return (False, None)  # status is awaiting or in progress
-    except Exception as e:
-        print("Http Error (" + str(response.status_code) + "): " + str(e), file=sys.stderr)            
-        if response != None:
-            print("Reason: " + response.text, file=sys.stderr)
-            sys.exit(1)
+    except requests.exceptions.RequestException as e:
+        handleRequestException(e, url, "Polling VDI for upload status")    
 
 def handle_job_invalid_status(response_json):
     msgLines = []
@@ -286,25 +303,27 @@ def putShareOffers(vdId, udJson, vdiServiceUrl, vdiHeaders):
     jsonBody = {"action": "grant"}                                  
     for recipientId in udJson["sharedWith"]:                             
         try:
-            response = requests.put(vdiServiceUrl + "/vdi-datasets/" + vdiId + "/shares/" + recipientId + "/offer", json = jsonBody, headers=vdiHeaders, verify=SSL_VERIFY())
+            url = vdiDatasetsUrl + "/" + vdiId + "/shares/" + recipientId + "/offer"
+            response = requests.put(url, json = jsonBody, headers=vdiHeaders, verify=SSL_VERIFY())
             response.raise_for_status()
-        except Exception as e:
-            print("Http Error (" + str(response.status_code) + "): " + str(e), file=sys.stderr)            
-            if response != None:
-                print("Reason: " + response.text, file=sys.stderr)
-                sys.exit(1)
+            response.close()
+        except requests.exceptions.RequestException as e:
+            handleRequestException(e, url, "Put share offer to VDI")    
 
-def putShareReciept(vdiId, recipientId, vdiServiceUrl, vdiHeaders):
+def putShareReciept(vdiId, recipientId, vdiDatasetsUrl, vdiHeaders):
     jsonBody = {"action": "accept"}                                  
     try:
-        response = requests.put(vdiServiceUrl + "/vdi-datasets/" + vdiId + "/shares/" + recipientId + "/receipt", json = jsonBody, headers=vdiHeaders, verify=SSL_VERIFY())
+        url = vdiDatasetsUrl + "/" + vdiId + "/shares/" + recipientId + "/receipt"
+        response = requests.put(url, json = jsonBody, headers=vdiHeaders, verify=SSL_VERIFY())
         response.raise_for_status()
-        print("Shared receipt.  Owner: " + vdiId + " Recipient: " + recipientId, file=sys.stderr)
-    except Exception as e:
-        print("Http Error (" + str(response.status_code) + "): " + str(e), file=sys.stderr)            
-        if response != None:
-            print("Reason: " + response.text, file=sys.stderr)
-            sys.exit(1)
+        response.close()
+    except requests.exceptions.RequestException as e:
+        handleRequestException(e, url, "Put share offer to VDI")    
+
+def handleRequestException(e, url, msg):
+    print("Error " + msg + ". Exception type: " + str(type(e)) + " Code: " + str(e.response.status_code) + " " + e.response.text, file=sys.stderr)
+    print("Error URL: " + url, file=sys.stderr)            
+    exit(1)
 
 
 """
@@ -324,8 +343,22 @@ display: "ISA Simple",
 name: "ISA",
 version: "0.0"
 },
-sharedWith: [ ],
-dependencies: [ ],
+sharedWith: [
+{
+userDisplayName: "Cristinaa Aurrecoechea",
+time: 1626446589000,
+user: 376,
+email: "aurreco@uga.edu"
+}
+],
+dependencies: [
+{
+resourceDisplayName: "TbruceiLister427 Genome",
+resourceIdentifier: "TriTrypDB-29_TbruceiLister427_Genome",
+resourceVersion: "29",
+compatibilityInfo: null
+}
+]
 isCompatible: null,
 size: 38926,
 meta: {
