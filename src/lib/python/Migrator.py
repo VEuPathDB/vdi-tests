@@ -77,6 +77,9 @@ class Migrator():
         alreadyCount = 0
         ignoreCount = 0
         for udJson in udsJson:
+            udType = udJson["type"]["name"]
+ #           if udType != GENE_LIST:
+  #              continue
             udId = udJson["id"]
             udUserId = int(udJson["userId"])            
             if len(udJson["projects"]) == 0:
@@ -108,7 +111,6 @@ class Migrator():
             vdiId = postMetadataAndData(vdiDatasetsUrl, postBody, tarballName, vdiHeaders)
             invalidMessage = pollForUploadComplete(vdiDatasetsUrl, vdiId, vdiHeaders)   # teriminates if system  error
             putShareOffers(vdiId, udJson, vdiDatasetsUrl, vdiHeaders)
-            invalidMessage = None
             writeOwnerUdToTinyDb(tinyDb, udId, vdiId, invalidMessage)
 
         print("DONE WITH FIRST PASS. Uploaded: " + str(count) + " Already migrated: " + str(alreadyCount) + " Ignored: " + str(ignoreCount), file=sys.stderr)
@@ -202,7 +204,7 @@ def downloadFiles(fileNames, userId, udId, downloadDir, udServiceUrl, udHeaders)
         try:
             url = udServiceUrl + "/users/current/user-datasets/admin/" + str(userId) + "/" + str(udId) + "/user-datafiles/" + fileName
             request = urllib.request.Request(url, None, udHeaders)
-            response = urllib.request.urlopen(request)
+            response = urllib.request.urlopen(request, timeout=60)
             data = response.read()
             file_ = open(downloadDir + "/" + fileName, 'wb')
             file_.write(data)
@@ -211,7 +213,8 @@ def downloadFiles(fileNames, userId, udId, downloadDir, udServiceUrl, udHeaders)
         except urllib.error.HTTPError as e:
            print("Died trying to download from UD service: " + str(e.code)  + " " + e.reason, file=sys.stderr)
            exit(1)
-
+    print("Done downloading files", file=sys.stderr)
+           
 def createTarball(dirpath, tarFileName):
     #print("dirpath " + str(dirpath), file=sys.stderr)
     os.chdir(dirpath)
@@ -293,7 +296,7 @@ def handle_job_invalid_status(response_json):
     msgLines = []
     for msg in response_json["importMessages"]:
         msgLines.append(msg)
-    return join(msgLines)
+    return ', '.join(msgLines)
 
 # /vdi-datasets/{vd-id}/shares/{recipient-user-id}/offer                                          
 def putShareOffers(vdiId, udJson, vdiServiceUrl, vdiHeaders):
