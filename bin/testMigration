@@ -1,0 +1,92 @@
+#!/usr/bin/perl
+
+use strict;
+use DBI;
+use JSON qw( decode_json );
+use Date::Manip qw(UnixDate);
+
+my @envVars = ('DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_PLATFORM', 'DB_USER', 'DB_PASS');
+
+my ($tinydbFilePath, $timestampLimit, $vdiSchemaSuffix) = @ARGV;
+
+die "Insufficient arguments\n" unless scalar(@ARGV) == 3;
+
+# Convert to standard date format ("YYYY-MM-DD HH:MM:SS")
+my $formatted_date = UnixDate(int($timestampLimit / 1000), '%Y-%m-%d %H:%M:%S');
+my $dbTimeLimit = "to_date('$formated_date', 'YYYY-MM-DD HH:MM:SS')";
+
+for my $envVar (@envVars) { die "Missing env variable '$envVar'\n" unless $ENV{$envVar}; }
+my $dbh = DBI->connect("dbi:$ENV{DB_PLATFORM}://$ENV{DB_HOST}:$ENV{DB_PORT}/$ENV{DB_NAME}", $ENV{DB_USER}, $ENV{DB_PASS})
+    || die "Couldn't connect to database: " . DBI->errstr;
+
+$dbh->{RaiseError} = 1;
+
+my $vdiDatasetsSchema = "VDI_DATASETS_$vdiSchemaSuffix";
+my $vdiControlSchema = "VDI_CONTROL_$vdiSchemaSuffix";
+
+writeIdMapToDb($tinydbFilePath, $dbh, "$vdiDatasetsSchema/idmap");
+
+testGeneList($dbh);
+
+sub writeIdMapToDb {
+  my ($tinydbFilePath, $dbh, $idMapTable) = @_;
+
+  open my $fh, '<', $tinydbFilePath or die "error opening $tinydbFilePath: $!";
+  my $tinyJson = do { local $/; <$fh> };
+
+  my $tiny = decode_json($tinyJson);
+
+  $dbh->do('truncate $idMapTable');
+
+  my $sth = $dbh->prepare(<<EOF);
+    INSERT INTO $idMapTable
+    VALUES (?,?)
+EOF
+
+  foreach my $record ($tiny) {
+    $sth->execute($tiny->{udId}, $tiny->{vdiId});
+  }
+  $dbh->commit();
+}
+
+sub testGeneList {
+  my ($dbh, $vdiDatasetsSchema, $vdiControlSchema, $dbTimeLimit) = @_;
+
+  my $vdiSql = "
+select vdiId, udId, gene_source_id
+from $vdiDatasetsSchema.idmap id, $vdiDatasetsSchema.ud_geneid g
+where g.user_dataset_id = id.vdiId
+";
+
+  my $udSql = "
+select vdiId, g.user_dataset_id, gene_source_id
+from $vdiDatasetsSchema.idmap id, apidbuserdatasets.userdatasetevent e, apidbuserdatasets.ug_geneid g
+where g.user_dataset_id = id.vdiId
+and g.user_dataset_id = e.user_dataset_id
+and e.handled_time < $dbTimeLimit
+";
+
+  my $sql = "$vdiSql
+MINUS
+$udSql
+";
+  my $sth = $dbh->prepare($sql);
+  $sth->execute();
+  print STDOUT "Gene List VDI minus UD\n";
+  while(my @row = $sth->fetchrow_array) {
+    print STDOUT join("\t", @row) . "\n";
+  }
+
+  my $sql = "$udSql
+MINUS
+$vdiSql
+";
+  my $sth = $dbh->prepare($sql);
+  $sth->execute();
+  print STDOUT "Gene List UD minus VDI\n";
+  while(my @row = $sth->fetchrow_array) {
+    print STDOUT join("\t", @row) . "\n";
+  }
+
+}
+

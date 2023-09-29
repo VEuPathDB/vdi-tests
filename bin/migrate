@@ -9,7 +9,7 @@ def usage():
     msg = """
 Migrate user datasets from the iRODs UD system to VDI.
 
-Usage:  migrate tiny_db_json_file work_dir ud_service_url vdi_service_url vdi_admin_auth_token count_limit <projects...>
+Usage:  migrate tiny_db_json_file work_dir ud_service_url vdi_service_url vdi_admin_auth_token count_limit timestamp_limit <projects...>
 
 Environment: UD_AUTH_TKT is the value of the auth_tkt
 
@@ -20,7 +20,7 @@ If projects is empty, then do all projects
     sys.exit(2)
 
 def main():
-    if len(sys.argv) < 8:
+    if len(sys.argv) < 9:
         usage()
     migrator = Migrator()
     myArgs = sys.argv
