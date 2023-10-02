@@ -65,7 +65,7 @@ $udSql
 ";
   my $sth = $dbh->prepare($sql);
   $sth->execute();
-  print STDOUT "Gene List VDI minus UD\n";
+  print STDOUT "Gene List - VDI minus UD\n";
   while(my @row = $sth->fetchrow_array) {
     print STDOUT join("\t", @row) . "\n";
   }
@@ -76,7 +76,7 @@ $vdiSql
 ";
   my $sth = $dbh->prepare($sql);
   $sth->execute();
-  print STDOUT "Gene List UD minus VDI\n";
+  print STDOUT "Gene List - UD minus VDI\n";
   while(my @row = $sth->fetchrow_array) {
     print STDOUT join("\t", @row) . "\n";
   }
