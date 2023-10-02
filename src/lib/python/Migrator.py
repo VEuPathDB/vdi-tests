@@ -41,7 +41,7 @@ print("authTkt: " + authTkt, file=sys.stderr)
 
 class Migrator():
 
-    def migrate(self, tinyDbJsonFile, workingDir, udServiceUrl, vdiServiceUrl, vdiAdminAuthKey, countLimit, timestampLimit, *targetProjects):
+    def migrate(self, tinyDbJsonFile, workingDir, udServiceUrl, vdiServiceUrl, vdiAdminAuthKey, countLimit, *targetProjects):
         
         UD_HEADERS = {"Accept": "application/json", "Auth-Key": "dontcare", "originating-user-id": "dontcare", "Cookie": authTkt}
         UD_HEADERS_FILE = {"Auth-Key": "dontcare", "originating-user-id": "dontcare", "Cookie": authTkt}
@@ -57,14 +57,11 @@ class Migrator():
 
         tinyDb = TinyDB(tinyDbJsonFile)
 
-        a = [tinyDbJsonFile, workingDir, udServiceUrl, vdiServiceUrl, vdiAdminAuthKey, countLimit, timestampLimit, str(targetProjects)]
+        a = [tinyDbJsonFile, workingDir, udServiceUrl, vdiServiceUrl, vdiAdminAuthKey, countLimit, str(targetProjects)]
         print("cmdline args: " + ', '.join(a), file=sys.stderr)
 
         vdiDatasetsUrl = vdiServiceUrl + "/vdi-datasets"
 
-        if timestampLimit < 0:
-            timestampLimit = 9999999999999  # very far in the future
-        
         # first pass: for UD owner.  Get json with all UDs.  Then iterate.
         udsJson = ""
         try:
@@ -75,16 +72,15 @@ class Migrator():
             response.close()
         except requests.exceptions.RequestException as e:
             handleRequestException(e, url, "Posting metadata and data to VDI")    
-        
+
+        sortedUdsJson = sorted(udsJson, key=lambda d: d["id"])  # import in order of UD creation
         count = 0
         alreadyCount = 0
         ignoreCount = 0
-        for udJson in udsJson:
-            if udJson["created"] > timestampLimit:
-                continue
+        for udJson in sortedUdsJson:
             udType = udJson["type"]["name"]
-#            if udType != GENE_LIST:
- #               continue
+            if udType != GENE_LIST:
+                continue
             udId = udJson["id"]
             udUserId = int(udJson["userId"])            
             if len(udJson["projects"]) == 0:
@@ -292,6 +288,7 @@ def checkUploadInprogress(vdiDatasetsUrl, vdiId, vdiHeaders):
             print("Upload complete: " + vdiId, file=sys.stderr)
             return (True, None)
         if json_blob["status"]["import"] == "invalid":
+            print("Upload invalid: " + vdiId, file=sys.stderr)
             return (True, handle_job_invalid_status(json_blob))
         return (False, None)  # status is awaiting or in progress
     except requests.exceptions.RequestException as e:
