@@ -39,7 +39,7 @@ sub writeIdMapToDb {
 EOF
 
   foreach my $record (keys $tiny) {
-    $sth->execute("$tiny->{$record}->{udId}", $tiny->{$record}->{vdiId});
+    $sth->execute($tiny->{$record}->{udId}, $tiny->{$record}->{vdiId});
   }
   $dbh->commit();
 }
@@ -56,7 +56,7 @@ where g.user_dataset_id = id.vdiId
   my $udSql = "
 select user_dataset_id, gene_source_id
 from apidbuserdatasets.ud_geneid
-where user_dataset_id < '$maxUdId'
+where user_dataset_id < $maxUdId
 ";
 
   my $sql = "$vdiSql
