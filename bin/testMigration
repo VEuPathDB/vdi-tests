@@ -8,9 +8,9 @@ use Data::Dumper;
 my @envVars = ('DB_NAME', 'DB_USER', 'DB_PASS');
 for my $envVar (@envVars) { die "Missing env variable '$envVar'\n" unless $ENV{$envVar}; }
 
-my ($tinydbFilePath, $maxUdId, $vdiSchemaSuffix, $idMapTable) = @ARGV;
+my ($tinydbFilePath, $maxUdId, $vdiSchemaSuffix, $idMapTable, $onlyDatasetIds) = @ARGV;
 
-die "Usage: testMigration tinydbFilePath maxUdId vdiSchemaSuffix idMapTable\n" unless scalar(@ARGV) == 4;
+die "Usage: testMigration tinydbFilePath maxUdId vdiSchemaSuffix idMapTable [1 to report only dataset ids]\n" unless scalar(@ARGV) > 4;
 
 my $dbh = DBI->connect("dbi:Oracle:$ENV{DB_NAME}", $ENV{DB_USER}, $ENV{DB_PASS})
     || die "Couldn't connect to database: " . DBI->errstr;
@@ -22,7 +22,7 @@ my $vdiControlSchema = "VDI_CONTROL_$vdiSchemaSuffix";
 
 writeIdMapToDb($tinydbFilePath, $dbh, $idMapTable);
 
-testGeneList($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId);
+testGeneList($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds);
 
 sub writeIdMapToDb {
   my ($tinydbFilePath, $dbh, $idMapTable) = @_;
@@ -45,16 +45,17 @@ EOF
 }
 
 sub testGeneList {
-  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId) = @_;
+  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds) = @_;
 
+  my $geneIdSql = $onlyDatasetIds? "" : ", trim(CHR(9) from gene_source_id)";
   my $vdiSql = "
-select id.udId, gene_source_id
+select id.udId $geneIdSql
 from $idMapTable id, $vdiDatasetsSchema.ud_geneid g
 where g.user_dataset_id = id.vdiId
 ";
 
   my $udSql = "
-select user_dataset_id, gene_source_id
+select user_dataset_id $geneIdSql
 from apidbuserdatasets.ud_geneid
 where user_dataset_id < $maxUdId
 ";
