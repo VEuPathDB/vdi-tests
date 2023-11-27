@@ -52,6 +52,7 @@ sub testGeneList {
 select id.udId $geneIdSql
 from $idMapTable id, $vdiDatasetsSchema.ud_geneid g
 where g.user_dataset_id = id.vdiId
+and id.udId < $maxUdId
 ";
 
   my $udSql = "
