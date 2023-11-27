@@ -2,7 +2,7 @@
 
 import sys
 sys.path.insert(0, "/opt/veupathdb/lib/python")
-sys.path.insert(0, "/home/sfischer/sourceCode/vdi-tests/src/lib/python")
+sys.path.insert(0, "../src/lib/python")
 from Migrator import Migrator
 
 def usage():
