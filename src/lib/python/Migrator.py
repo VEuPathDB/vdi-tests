@@ -77,9 +77,15 @@ class Migrator():
         count = 0
         alreadyCount = 0
         ignoreCount = 0
+
+        # Index of UDs that failed to import.  This is used to skip share
+        # attempts on datasets that are guaranteed to get an error code back
+        # from VDI.
+        invalid = {}
+
         for udJson in sortedUdsJson:
             udType = udJson["type"]["name"]
-            if udType != GENE_LIST:
+            if udType != GENE_LIST and udType != RNA_SEQ and udType != BIGWIG:
                 continue
             udId = udJson["id"]
             udUserId = int(udJson["userId"])
@@ -109,9 +115,16 @@ class Migrator():
             postBody = createBodyForPost(udJson)
             vdiHeaders = VDI_HEADERS
             vdiHeaders["User-ID"] = str(udUserId)
-            vdiId = postMetadataAndData(vdiDatasetsUrl, postBody, tarballName, vdiHeaders)
+            vdiId = postMetadataAndData(vdiDatasetsUrl, postBody, os.path.join(downloadDir, tarballName), vdiHeaders)
             invalidMessage = pollForUploadComplete(vdiDatasetsUrl, vdiId, vdiHeaders)   # teriminates if system  error
-            putShareOffers(vdiId, udJson, vdiDatasetsUrl, vdiHeaders)
+
+            # If we got an invalid message then we should not attempt to share
+            # the dataset.
+            if invalidMessage is not None:
+                invalid[vdiId] = True
+            else:
+                putShareOffers(vdiId, udJson, vdiDatasetsUrl, vdiHeaders)
+
             writeOwnerUdToTinyDb(tinyDb, udId, vdiId, invalidMessage)
             print("Completed upload " + str(count), file=sys.stderr)
 
@@ -119,11 +132,18 @@ class Migrator():
 
 
         # second pass for share recipients
-        shareCount = 0;
+        shareCount = 0
         for udJson in udsJson:
             udId = udJson["id"]
             udUserId = udJson["userId"]  # recipient ID
             udOwnerId = str(udJson["ownerUserId"])
+
+            # If the ud failed import then attempting to share the dataset will
+            # result in an error code from the VDI service.
+            if udId in invalid:
+                print(f"Skipping shares for dataset {udOwnerId}/{udId} as it failed import.")
+                continue
+
             if udOwnerId  == udUserId:
                 continue
             if not alreadyMigrated(tinyDb, udId):
@@ -133,7 +153,7 @@ class Migrator():
                 print("Skipping UD share.  Already shared: " + str(udId), file=sys.stderr)
                 continue
             vdiHeaders = VDI_HEADERS
-            vdiHeaders["User-ID"] = str(udUserId)
+            vdiHeaders["User-ID"] = str(udOwnerId)
             print("Sharing UD ID " + str(udId) + " with user " + udUserId + " owner " + udOwnerId, file=sys.stderr)
             putShareReceipt(vdiId, udUserId, vdiDatasetsUrl, vdiHeaders)
             writeRecipientUdToTinyDb(tinyDb, udId, vdiId, udUserId)
@@ -218,7 +238,8 @@ def downloadFiles(fileNames, userId, udId, downloadDir, udServiceUrl, udHeaders)
     print("Done downloading files", file=sys.stderr)
 
 def createTarball(dirpath, tarFileName):
-    #print("dirpath " + str(dirpath), file=sys.stderr)
+    oldPath = os.getcwd()
+    print(f"changing cwd to ./{dirpath}")
     os.chdir(dirpath)
     try:
         os.remove(tarFileName)
@@ -226,8 +247,12 @@ def createTarball(dirpath, tarFileName):
         pass
     with tarfile.open(tarFileName, "x:gz") as tarball:
         for filename in os.listdir(os.getcwd()):
-            print("Adding file to tarball: " + filename, file=sys.stderr)
-            tarball.add(filename)
+            if filename != tarFileName:
+                print("Adding file to tarball: " + filename, file=sys.stderr)
+                tarball.add(filename)
+    print(f"changing cwd to {oldPath}")
+    os.chdir(oldPath)
+
 
 def createBodyForPost(udJson):
     origin = "direct-upload"
