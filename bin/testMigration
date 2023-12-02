@@ -41,7 +41,6 @@ EOF
   foreach my $record (keys $tiny) {
     $sth->execute($tiny->{$record}->{udId}, $tiny->{$record}->{vdiId});
   }
-  $dbh->commit();
 }
 
 sub testGeneList {
