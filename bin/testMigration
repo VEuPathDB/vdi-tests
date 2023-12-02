@@ -56,10 +56,12 @@ group by id.udId
 ";
 
   my $udSql = "
-select user_dataset_id, count(gene_source_id)
-from apidbuserdatasets.ud_geneid
-where user_dataset_id < $maxUdId
-group by user_dataset_id
+select g.user_dataset_id, count(gene_source_id)
+from apidbuserdatasets.ud_geneid g, apidbuserdatasets.UserDatasetEvent e
+where g.user_dataset_id < $maxUdId
+and g.user_dataset_id = e.user_dataset_id
+and e.status = 'complete'
+group by g.user_dataset_id
 ";
 
   my $sql = "$vdiSql
