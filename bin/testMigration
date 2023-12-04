@@ -60,7 +60,7 @@ select g.user_dataset_id, count(gene_source_id)
 from apidbuserdatasets.ud_geneid g, apidbuserdatasets.UserDatasetEvent e
 where g.user_dataset_id < $maxUdId
 and g.user_dataset_id = e.user_dataset_id
-and e.status = 'complete'
+and e.status = 'complete' and e.event_type = 'install'
 group by g.user_dataset_id
 ";
 
