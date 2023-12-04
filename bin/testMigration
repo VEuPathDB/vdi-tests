@@ -157,6 +157,7 @@ $vdiSql
   my $sth = $dbh->prepare($sql);
   $sth->execute();
   print STDOUT "==== $udType - UD minus VDI ====\n";
+  print STDOUT "UD-ID\timport-status\tinstall-status\n";
   while (my @row = $sth->fetchrow_array) {
     $count += 1;
     my $importMsg;
@@ -167,7 +168,7 @@ $vdiSql
     $invalidCount += $importedUds->{$row[0]};
     print STDOUT join("\t", @row) . "\t$importMsg\t$vdiStatus\n";
   }
-  print "$udType - UD minus VDI count: $count ($invalidCount invalid)\n";
+  print "$udType - UD minus VDI count: $count\n";
   print STDOUT "\n";
 
   my $sql = "$vdiSql
@@ -179,8 +180,9 @@ $udSql
   my $sth = $dbh->prepare($sql);
   $sth->execute();
   print STDOUT "==== $udType - VDI minus UD ====\n";
+  print STDOUT "UD-ID\tUD-status\n";
   while (my @row = $sth->fetchrow_array) {
-    my $msg = $udStatus->{$row[0]};
+    my $msg = $udStatus->{$row[0]}? $udStatus->{$row[0]} : 'complete';
     print STDOUT join("\t", @row) . "\t$msg\n";
     $count+=1;
   }
