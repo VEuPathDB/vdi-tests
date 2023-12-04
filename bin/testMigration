@@ -12,6 +12,9 @@ my ($tinydbFilePath, $maxUdId, $vdiSchemaSuffix, $idMapTable, $onlyDatasetIds) =
 
 die "Usage: testMigration tinydbFilePath maxUdId vdiSchemaSuffix idMapTable [1 to report only dataset ids]\n" unless scalar(@ARGV) > 4;
 
+my $VALID = 1;
+my $INVALID = 2;
+
 my $dbh = DBI->connect("dbi:Oracle:$ENV{DB_NAME}", $ENV{DB_USER}, $ENV{DB_PASS})
     || die "Couldn't connect to database: " . DBI->errstr;
 
@@ -20,11 +23,12 @@ $dbh->{RaiseError} = 1;
 my $vdiDatasetsSchema = "VDI_DATASETS_$vdiSchemaSuffix";
 my $vdiControlSchema = "VDI_CONTROL_$vdiSchemaSuffix";
 
-my $invalidUds = writeIdMapToDb($tinydbFilePath, $dbh, $idMapTable);
-my $notCompleteUds = findNotCompleteUds($dbh, $vdiControlSchema, $idMapTable);
+my $importedUds = writeIdMapToDb($tinydbFilePath, $dbh, $idMapTable);
+my $udStatus = findUdStatus($dbh);
+my $vdiStatus = findVdiStatus($dbh, $vdiControlSchema, $idMapTable);
 
-testGeneList($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $invalidUds, $notCompleteUds);
-testRnaSeq($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $invalidUds, $notCompleteUds);
+testGeneList($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $importedUds, $vdiStatus, $udStatus);
+testRnaSeq($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $importedUds, $vdiStatus, $udStatus);
 
 sub writeIdMapToDb {
   my ($tinydbFilePath, $dbh, $idMapTable) = @_;
@@ -40,35 +44,62 @@ sub writeIdMapToDb {
     VALUES (?,?,?)
 EOF
 
-  my $invalidUds = {};
+  my $importedUds = {};
   foreach my $record (keys $tiny) {
-    my $invalid = $tiny->{$record}->{msg}? 1 : 0;
+    my $valid = $tiny->{$record}->{msg}? $INVALID : $VALID;
     my $udId = $tiny->{$record}->{udId};
-    $sth->execute($udId, $tiny->{$record}->{vdiId}, $invalid);
-    $invalidUds->{$udId} = 1 if $invalid;
+    $sth->execute($udId, $tiny->{$record}->{vdiId}, $valid == $INVALID);
+    $importedUds->{$udId} =  $valid;
   }
-  return $invalidUds;
+  return $importedUds;
 }
 
-sub findNotCompleteUds {
+sub findUdStatus {
+  my ($dbh) = @_;
+
+  my $sql = "
+select user_dataset_id from APIDBUSERDATASETS.installeduserdataset where is_invalid is not null
+";
+
+  my $udStatus = {};
+  my $sth = $dbh->prepare($sql);
+  $sth->execute();
+  while (my @row = $sth->fetchrow_array) {
+    $udStatus->{$row[0]} = "invalid";
+  }
+  my $sql = "
+select user_dataset_id from APIDBUSERDATASETS.UserDatasetEvent where status != 'complete'
+";
+
+  my $udStatus = {};
+  my $sth = $dbh->prepare($sql);
+  $sth->execute();
+  while (my @row = $sth->fetchrow_array) {
+    $udStatus->{$row[0]} = "incomplete";
+  }
+  return $udStatus;
+}
+
+
+sub findVdiStatus {
   my ($dbh, $vdiControlSchema, $idMapTable) = @_;
   my $sql = "
 select ids.udid, status from $vdiControlSchema.dataset_install_message m, $idMapTable ids
-where m.install_type = 'data' and status != 'complete'
+where m.install_type = 'data'
 and ids.vdiid = m.dataset_id
 ";
 
-my $notComplete = {};
+my $vdiStatus = {};
 my $sth = $dbh->prepare($sql);
   $sth->execute();
   while (my @row = $sth->fetchrow_array) {
-    $notComplete->{$row[0]} = $row[1];
+    $vdiStatus->{$row[0]} = $row[1];
   }
-  return $notComplete;
+  return $vdiStatus;
 }
 
 sub testGeneList {
-  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $invalidUds, $notCompleteUds) = @_;
+  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $importedUds, $vdiStatus, $udStatus) = @_;
 
   my $vdiSql = "
 select id.udId, count(gene_source_id)
@@ -87,11 +118,11 @@ and e.status = 'complete' and e.event_type = 'install'
 group by g.user_dataset_id
 ";
 
-  produceCountComparison($vdiSql, $udSql, "Gene List", $invalidUds, $notCompleteUds);
+  produceCountComparison($vdiSql, $udSql, "Gene List", $importedUds, $vdiStatus, $udStatus);
 }
 
 sub testRnaSeq {
-  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $invalidUds, $notCompleteUds) = @_;
+  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $importedUds, $vdiStatus, $udStatus) = @_;
 
   my $vdiSql = "
 select id.udId, count(profile_set_id)
@@ -110,11 +141,11 @@ and e.status = 'complete' and e.event_type = 'install'
 group by p.user_dataset_id
 ";
 
-  produceCountComparison($vdiSql, $udSql, "Rna Seq", $invalidUds, $notCompleteUds);
+  produceCountComparison($vdiSql, $udSql, "Rna Seq", $importedUds, $vdiStatus, $udStatus);
 }
 
 sub produceCountComparison {
-  my($vdiSql, $udSql, $udType, $invalidUds, $notCompleteUds) = @_;
+  my($vdiSql, $udSql, $udType, $importedUds, $vdiStatus, $udStatus) = @_;
 
   my $sql = "$udSql
 MINUS
@@ -128,10 +159,13 @@ $vdiSql
   print STDOUT "==== $udType - UD minus VDI ====\n";
   while (my @row = $sth->fetchrow_array) {
     $count += 1;
-    my $invalid = $invalidUds->{$row[0]}? "invalid" : "";
-    my $notComplete = $notCompleteUds->{$row[0]};
-    $invalidCount += $invalidUds->{$row[0]};
-    print STDOUT join("\t", @row) . "\t$invalid\t$notComplete\n";
+    my $importMsg;
+    $importMsg = "missing import" unless $importedUds->{$row[0]};
+    $importMsg = "invalid import" if $importedUds->{$row[0]} == $INVALID;
+    my $vdiStatus = $vdiStatus->{$row[0]};
+    $vdiStatus = "not installed" unless $importMsg || $vdiStatus;
+    $invalidCount += $importedUds->{$row[0]};
+    print STDOUT join("\t", @row) . "\t$importMsg\t$vdiStatus\n";
   }
   print "$udType - UD minus VDI count: $count ($invalidCount invalid)\n";
   print STDOUT "\n";
@@ -146,7 +180,8 @@ $udSql
   $sth->execute();
   print STDOUT "==== $udType - VDI minus UD ====\n";
   while (my @row = $sth->fetchrow_array) {
-    print STDOUT join("\t", @row) . "\n";
+    my $msg = $udStatus->{$row[0]};
+    print STDOUT join("\t", @row) . "\t$msg\n";
     $count+=1;
   }
 
