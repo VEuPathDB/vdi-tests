@@ -17,20 +17,33 @@ foreach my $ud (@$wdk) {
   my $type = $ud->{type}->{name};
   my $id = $ud->{id};
   $udTypes->{$id} = $type;
+#  my $datafiles = $ud->{datafiles};
+#  if ($type eq 'RnaSeq') {
+#    my $hasTxt;
+#    foreach my $df (@$datafiles) {
+#      $hasTxt |= $df->{name} =~ /txt$/;
+#    }
+#    print "$id $hasTxt\n";# unless $hasTxt;
+  }
 }
-#print Dumper $rnaSeqIds;
 
 open my $fh, '<', $ARGV[1] or die "error opening $ARGV[1]: $!";
 my $tinyJson = do { local $/; <$fh> };
 
 my $tiny = decode_json($tinyJson)->{'_default'};
 
+my @uds;
 foreach my $record (keys %$tiny) {
   my $udId = $tiny->{$record}->{udId};
   my $vdiId = $tiny->{$record}->{vdiId};
   my $type = $udTypes->{$udId};
   my $msg = $tiny->{$record}->{msg};
-  print "$udId\t$vdiId\t$type\t$msg\n" if $msg;
+  print "$udId\t$vdiId\t$type\t'$msg'\n" unless $msg;
+#  print "$udId\t$vdiId\t$type\t|$msg|\n";
+    push(@uds, $udId) if $type eq 'RnaSeq' and not $msg;
+  print "happy $udId\n" if $msg and length($msg) < 2;
 }
+print join(", ", @uds) . "arg\n";
+print scalar(@uds);
 
 
