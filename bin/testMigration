@@ -20,9 +20,11 @@ $dbh->{RaiseError} = 1;
 my $vdiDatasetsSchema = "VDI_DATASETS_$vdiSchemaSuffix";
 my $vdiControlSchema = "VDI_CONTROL_$vdiSchemaSuffix";
 
-writeIdMapToDb($tinydbFilePath, $dbh, $idMapTable);
+my $invalidUds = writeIdMapToDb($tinydbFilePath, $dbh, $idMapTable);
+my $notCompleteUds = findNotCompleteUds($dbh, $vdiControlSchema, $idMapTable);
 
-testGeneList($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds);
+testGeneList($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $invalidUds, $notCompleteUds);
+testRnaSeq($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $invalidUds, $notCompleteUds);
 
 sub writeIdMapToDb {
   my ($tinydbFilePath, $dbh, $idMapTable) = @_;
@@ -35,18 +37,39 @@ sub writeIdMapToDb {
 
   my $sth = $dbh->prepare(<<EOF);
     INSERT INTO $idMapTable
-    VALUES (?,?)
+    VALUES (?,?,?)
 EOF
 
+  my $invalidUds = {};
   foreach my $record (keys $tiny) {
-    $sth->execute($tiny->{$record}->{udId}, $tiny->{$record}->{vdiId});
+    my $invalid = $tiny->{$record}->{msg}? 1 : 0;
+    my $udId = $tiny->{$record}->{udId};
+    $sth->execute($udId, $tiny->{$record}->{vdiId}, $invalid);
+    $invalidUds->{$udId} = 1 if $invalid;
   }
+  return $invalidUds;
+}
+
+sub findNotCompleteUds {
+  my ($dbh, $vdiControlSchema, $idMapTable) = @_;
+  my $sql = "
+select ids.udid, status from $vdiControlSchema.dataset_install_message m, $idMapTable ids
+where m.install_type = 'data' and status != 'complete'
+and ids.vdiid = m.dataset_id
+";
+
+my $notComplete = {};
+my $sth = $dbh->prepare($sql);
+  $sth->execute();
+  while (my @row = $sth->fetchrow_array) {
+    $notComplete->{$row[0]} = $row[1];
+  }
+  return $notComplete;
 }
 
 sub testGeneList {
-  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds) = @_;
+  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $invalidUds, $notCompleteUds) = @_;
 
-  my $geneIdSql = $onlyDatasetIds? "" : ", trim(CHR(9) from gene_source_id)";
   my $vdiSql = "
 select id.udId, count(gene_source_id)
 from $idMapTable id, $vdiDatasetsSchema.ud_geneid g
@@ -64,34 +87,70 @@ and e.status = 'complete' and e.event_type = 'install'
 group by g.user_dataset_id
 ";
 
-  produceCountComparison($vdiSql, $udSql, "Gene List");
+  produceCountComparison($vdiSql, $udSql, "Gene List", $invalidUds, $notCompleteUds);
+}
+
+sub testRnaSeq {
+  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $invalidUds, $notCompleteUds) = @_;
+
+  my $vdiSql = "
+select id.udId, count(profile_set_id)
+from $idMapTable id, $vdiDatasetsSchema.ud_profileset p
+where p.user_dataset_id = id.vdiId
+and id.udId < $maxUdId
+group by id.udId
+";
+
+  my $udSql = "
+select p.user_dataset_id, count(profile_set_id)
+from apidbuserdatasets.ud_profileset p, apidbuserdatasets.UserDatasetEvent e
+where p.user_dataset_id < $maxUdId
+and p.user_dataset_id = e.user_dataset_id
+and e.status = 'complete' and e.event_type = 'install'
+group by p.user_dataset_id
+";
+
+  produceCountComparison($vdiSql, $udSql, "Rna Seq", $invalidUds, $notCompleteUds);
 }
 
 sub produceCountComparison {
-  my($vdiSql, $udSql, $udType) = @_;
+  my($vdiSql, $udSql, $udType, $invalidUds, $notCompleteUds) = @_;
 
   my $sql = "$udSql
 MINUS
 $vdiSql
 ";
+
+  my $count;
+  my $invalidCount;
   my $sth = $dbh->prepare($sql);
   $sth->execute();
   print STDOUT "==== $udType - UD minus VDI ====\n";
   while (my @row = $sth->fetchrow_array) {
-    print STDOUT join("\t", @row) . "\n";
+    $count += 1;
+    my $invalid = $invalidUds->{$row[0]}? "invalid" : "";
+    my $notComplete = $notCompleteUds->{$row[0]};
+    $invalidCount += $invalidUds->{$row[0]};
+    print STDOUT join("\t", @row) . "\t$invalid\t$notComplete\n";
   }
-
+  print "$udType - UD minus VDI count: $count ($invalidCount invalid)\n";
   print STDOUT "\n";
 
   my $sql = "$vdiSql
 MINUS
 $udSql
 ";
+
+  $count = 0;
   my $sth = $dbh->prepare($sql);
   $sth->execute();
   print STDOUT "==== $udType - VDI minus UD ====\n";
   while (my @row = $sth->fetchrow_array) {
     print STDOUT join("\t", @row) . "\n";
+    $count+=1;
   }
+
+  print "$udType - VDI minus UD count: $count\n";
+  print STDOUT "\n";
 
 }
