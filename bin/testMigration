@@ -64,16 +64,11 @@ and e.status = 'complete'
 group by g.user_dataset_id
 ";
 
-  my $sql = "$vdiSql
-MINUS
-$udSql
-";
-  my $sth = $dbh->prepare($sql);
-  $sth->execute();
-  print STDOUT "Gene List - VDI minus UD\n";
-  while(my @row = $sth->fetchrow_array) {
-    print STDOUT join("\t", @row) . "\n";
-  }
+  produceCountComparison($vdiSql, $udSql, "Gene List");
+}
+
+sub produceCountComparison {
+  my($vdiSql, $udSql, $udType) = @_;
 
   my $sql = "$udSql
 MINUS
@@ -81,10 +76,22 @@ $vdiSql
 ";
   my $sth = $dbh->prepare($sql);
   $sth->execute();
-  print STDOUT "Gene List - UD minus VDI\n";
-  while(my @row = $sth->fetchrow_array) {
+  print STDOUT "==== $udType - UD minus VDI ====\n";
+  while (my @row = $sth->fetchrow_array) {
+    print STDOUT join("\t", @row) . "\n";
+  }
+
+  print STDOUT "\n";
+
+  my $sql = "$vdiSql
+MINUS
+$udSql
+";
+  my $sth = $dbh->prepare($sql);
+  $sth->execute();
+  print STDOUT "==== $udType - VDI minus UD ====\n";
+  while (my @row = $sth->fetchrow_array) {
     print STDOUT join("\t", @row) . "\n";
   }
 
 }
-
