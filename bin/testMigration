@@ -8,20 +8,21 @@ use Data::Dumper;
 my @envVars = ('DB_NAME', 'DB_USER', 'DB_PASS');
 for my $envVar (@envVars) { die "Missing env variable '$envVar'\n" unless $ENV{$envVar}; }
 
-my ($tinydbFilePath, $maxUdId, $vdiSchemaSuffix, $idMapTable, $onlyDatasetIds) = @ARGV;
+my ($tinydbFilePath, $maxUdId, $vdiSchemaSuffix, $onlyDatasetIds) = @ARGV;
 
-die "Usage: testMigration tinydbFilePath maxUdId vdiSchemaSuffix idMapTable [1 to report only dataset ids]\n" unless scalar(@ARGV) > 4;
+die "Usage: testMigration tinydbFilePath maxUdId vdiSchemaSuffix [1 to report only dataset ids]\n" unless scalar(@ARGV) > 3;
 
-my $VALID = 1;
-my $INVALID = 2;
+my $VALID_IMPORT_MSG = "VALID";
 
 my $dbh = DBI->connect("dbi:Oracle:$ENV{DB_NAME}", $ENV{DB_USER}, $ENV{DB_PASS})
     || die "Couldn't connect to database: " . DBI->errstr;
 
 $dbh->{RaiseError} = 1;
+$dbh->{LongTruncOk} = 1;
 
 my $vdiDatasetsSchema = "VDI_DATASETS_$vdiSchemaSuffix";
 my $vdiControlSchema = "VDI_CONTROL_$vdiSchemaSuffix";
+my $idMapTable = "vdiUdIdMap_$vdiSchemaSuffix";
 
 my $importedUds = writeIdMapToDb($tinydbFilePath, $dbh, $idMapTable);
 my $udStatus = findUdStatus($dbh);
@@ -30,6 +31,7 @@ my $vdiStatus = findVdiStatus($dbh, $vdiControlSchema, $idMapTable);
 testGeneList($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $importedUds, $vdiStatus, $udStatus);
 testRnaSeq($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $importedUds, $vdiStatus, $udStatus);
 
+# create table XXXXX ( udId number, vdiId varchar(100), isInvalid number);
 sub writeIdMapToDb {
   my ($tinydbFilePath, $dbh, $idMapTable) = @_;
 
@@ -46,10 +48,11 @@ EOF
 
   my $importedUds = {};
   foreach my $record (keys $tiny) {
-    my $valid = $tiny->{$record}->{msg}? $INVALID : $VALID;
+    my $msg = $tiny->{$record}->{msg};
+    my $valid = $msg? 0 : 1;
     my $udId = $tiny->{$record}->{udId};
-    $sth->execute($udId, $tiny->{$record}->{vdiId}, $valid == $INVALID);
-    $importedUds->{$udId} =  $valid;
+    $sth->execute($udId, $tiny->{$record}->{vdiId}, $valid);
+    $importedUds->{$udId} = {valid=>$valid, msg=>$msg};
   }
   return $importedUds;
 }
@@ -84,7 +87,7 @@ select user_dataset_id from APIDBUSERDATASETS.UserDatasetEvent where status != '
 sub findVdiStatus {
   my ($dbh, $vdiControlSchema, $idMapTable) = @_;
   my $sql = "
-select ids.udid, status from $vdiControlSchema.dataset_install_message m, $idMapTable ids
+select ids.udid, status, message from $vdiControlSchema.dataset_install_message m, $idMapTable ids
 where m.install_type = 'data'
 and ids.vdiid = m.dataset_id
 ";
@@ -93,7 +96,7 @@ my $vdiStatus = {};
 my $sth = $dbh->prepare($sql);
   $sth->execute();
   while (my @row = $sth->fetchrow_array) {
-    $vdiStatus->{$row[0]} = $row[1];
+    $vdiStatus->{$row[0]} = {status=>$row[1], msg=>$row[2]};
   }
   return $vdiStatus;
 }
@@ -145,7 +148,7 @@ group by p.user_dataset_id
 }
 
 sub produceCountComparison {
-  my($vdiSql, $udSql, $udType, $importedUds, $vdiStatus, $udStatus) = @_;
+  my($vdiSql, $udSql, $udType, $importedUds, $vdiStatusInfo, $udStatusInfo) = @_;
 
   my $sql = "$udSql
 MINUS
@@ -160,13 +163,19 @@ $vdiSql
   print STDOUT "UD-ID\timport-status\tinstall-status\n";
   while (my @row = $sth->fetchrow_array) {
     $count += 1;
-    my $importMsg;
-    $importMsg = "missing import" unless $importedUds->{$row[0]};
-    $importMsg = "invalid import" if $importedUds->{$row[0]} == $INVALID;
-    my $vdiStatus = $vdiStatus->{$row[0]};
-    $vdiStatus = "not installed" unless $importMsg || $vdiStatus;
+    my $importInfo = $importedUds->{$row[0]};
+    my $importStatus;
+    $importStatus = "import-missing" unless $importInfo;
+    $importStatus = "import-invalid" unless $importInfo->{valid};
+    my $msg = $importInfo->{msg};
+    my $vdiInfo = $vdiStatusInfo->{$row[0]};
+    my $vdiStatus;
+    if ($vdiInfo) {
+      $vdiStatus = $vdiInfo->{status};
+      $msg = $vdiInfo->{msg};
+    }
     $invalidCount += $importedUds->{$row[0]};
-    print STDOUT join("\t", @row) . "\t$importMsg\t$vdiStatus\n";
+    print STDOUT join("\t", @row) . "\t$importStatus\t$vdiStatus\t\$msg\\n";
   }
   print "$udType - UD minus VDI count: $count\n";
   print STDOUT "\n";
