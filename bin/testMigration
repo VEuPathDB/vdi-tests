@@ -8,11 +8,11 @@ use Data::Dumper;
 my @envVars = ('DB_NAME', 'DB_USER', 'DB_PASS');
 for my $envVar (@envVars) { die "Missing env variable '$envVar'\n" unless $ENV{$envVar}; }
 
-my ($tinydbFilePath, $maxUdId, $vdiSchemaSuffix, $onlyDatasetIds) = @ARGV;
+my ($tinydbFilePath, $udJsonFilePath, $targetDir, $maxUdId, $vdiSchemaSuffix, $onlyDatasetIds) = @ARGV;
 
-die "Usage: testMigration tinydbFilePath maxUdId vdiSchemaSuffix [1 to report only dataset ids]\n" unless scalar(@ARGV) > 3;
+die "Usage: testMigration tinydbFilePath targetDir udJsonFilePath maxUdId vdiSchemaSuffix [1 to report only dataset ids]\n" unless scalar(@ARGV) > 5;
 
-my $VALID_IMPORT_MSG = "VALID";
+die "Target dir '$targetDir' does not exist\n" unless -d $targetDir;
 
 my $dbh = DBI->connect("dbi:Oracle:$ENV{DB_NAME}", $ENV{DB_USER}, $ENV{DB_PASS})
     || die "Couldn't connect to database: " . DBI->errstr;
@@ -25,11 +25,13 @@ my $vdiControlSchema = "VDI_CONTROL_$vdiSchemaSuffix";
 my $idMapTable = "vdiUdIdMap_$vdiSchemaSuffix";
 
 my $importedUds = writeIdMapToDb($tinydbFilePath, $dbh, $idMapTable);
+my $expectedUdFiles = readUdJson($udJsonFilePath, $importedUds);
 my $udStatus = findUdStatus($dbh);
 my $vdiStatus = findVdiStatus($dbh, $vdiControlSchema, $idMapTable);
 
 testGeneList($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $importedUds, $vdiStatus, $udStatus);
 testRnaSeq($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $importedUds, $vdiStatus, $udStatus);
+testBigwig($importedUds, $targetDir, $expectedUdFiles);
 
 # create table XXXXX ( udId number, vdiId varchar(100), isInvalid number);
 sub writeIdMapToDb {
@@ -55,6 +57,30 @@ EOF
     $importedUds->{$udId} = {valid=>$valid, msg=>$msg};
   }
   return $importedUds;
+}
+
+sub readUdJson {
+  my ($jsonFilePath, $importedUds) = @_;
+
+  open my $fh, '<', $jsonFilePath or die "error opening $jsonFilePath: $!";
+  my $wdkJson = do { local $/; <$fh> };
+
+  my $wdk = decode_json($wdkJson);
+
+  my $expectedUdFiles = {};
+  foreach my $ud (@$wdk) {
+    my $type = $ud->{type}->{name};
+    next unless $type eq 'RnaSeq' or $type eq 'BigwigFiles';
+    my $datafiles = $ud->{datafiles};
+    $expectedUdFiles->{$type}->{$ud->{id}} = [];
+    my $files = $expectedUdFiles->{$type}->{$ud->{id}};
+    foreach my $datafile (@$datafiles) {
+      my $name = $datafile->{name};
+      next unless $name =~ /bw$/;
+      push(@$files, $name);
+    }
+  }
+  return $expectedUdFiles;
 }
 
 sub findUdStatus {
@@ -122,6 +148,22 @@ group by g.user_dataset_id
 ";
 
   produceCountComparison($vdiSql, $udSql, "Gene List", $importedUds, $vdiStatus, $udStatus);
+}
+
+sub testBigwig {
+  my ($importedUds, $targetDir, $expectedUdFiles) = @_;
+  my $bwFiles = $expectedUdFiles->{'BigwigFiles'};
+
+  print STDOUT "MISSING BIGWIG FILES\n";
+  foreach my $udId (sort keys %$importedUds) {
+    my $status = checkUdFiles($udId, $targetDir, $bwFiles);
+    if ($status->{missingDir}) {
+      print STDOUT "$udId\tmissing-directory\n";
+      next;
+    }
+    my $missing = $status->{missingFiles};
+    print STDOUT "$udId\t" . join(', ', @$missing) . "\n" if scalar @$missing;
+  }
 }
 
 sub testRnaSeq {
@@ -205,4 +247,27 @@ $udSql
   print "$udType - VDI minus UD count: $count\n";
   print STDOUT "\n";
 
+}
+
+sub checkUdFiles {
+  my ($udId, $targetDir, $expectedUdFiles) = @_;
+
+  my $expectedFiles = $expectedUdFiles->{$udId};
+  my $return = {missingDir=>0, missingFiles=>[]};
+  unless ($expectedFiles && scalar @$expectedFiles) {
+    return $return;
+  }
+
+  unless (-d "$targetDir/$udId") {
+    $return->{missingDir} = 1;
+    return $return;
+  }
+  opendir my $dir, "$targetDir/$udId" or die "Cannot open directory $targetDir/$udId: $!";
+  my @foundFiles = readdir $dir;
+  closedir $dir;
+  foreach my $f (@$expectedFiles) {
+    my $missingFiles = $return->{missingFiles};
+    push(@$missingFiles, $f) unless grep(/^$f$/, @foundFiles);
+  }
+  return $return;
 }
