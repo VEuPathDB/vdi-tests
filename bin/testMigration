@@ -217,7 +217,7 @@ $vdiSql
     $importStatus = "import-invalid" unless $importInfo->{valid};
     my $msg = $importInfo->{msg};
     my $vdiInfo = $vdiStatusInfo->{$row[0]};
-    my $vdiStatus;
+    my $vdiStatus = "absent-install" unless $importStatus;
     if ($vdiInfo) {
       $vdiStatus = $vdiInfo->{status};
       $msg = $vdiInfo->{msg};
