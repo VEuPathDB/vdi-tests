@@ -175,7 +175,7 @@ $vdiSql
       $msg = $vdiInfo->{msg};
     }
     $invalidCount += $importedUds->{$row[0]};
-    print STDOUT join("\t", @row) . "\t$importStatus\t$vdiStatus\t\$msg\\n";
+    print STDOUT join("\t", @row) . "\t$importStatus\t$vdiStatus\t$msg\n";
   }
   print "$udType - UD minus VDI count: $count\n";
   print STDOUT "\n";
