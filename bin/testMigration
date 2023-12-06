@@ -30,7 +30,7 @@ my $udStatus = findUdStatus($dbh);
 my $vdiStatus = findVdiStatus($dbh, $vdiControlSchema, $idMapTable);
 
 testGeneList($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $importedUds, $vdiStatus, $udStatus);
-testRnaSeq($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $importedUds, $vdiStatus, $udStatus);
+testRnaSeq($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $importedUds, $vdiStatus, $udStatus, $targetDir, $expectedUdFiles);
 testBigwig($importedUds, $targetDir, $expectedUdFiles);
 
 # create table XXXXX ( udId number, vdiId varchar(100), isInvalid number);
@@ -152,9 +152,15 @@ group by g.user_dataset_id
 
 sub testBigwig {
   my ($importedUds, $targetDir, $expectedUdFiles) = @_;
-  my $bwFiles = $expectedUdFiles->{'BigwigFiles'};
 
   print STDOUT "MISSING BIGWIG FILES\n";
+  return testFiles($importedUds, $targetDir, $expectedUdFiles, 'BigwigFiles');
+}
+
+sub testFiles {
+  my ($importedUds, $targetDir, $expectedUdFiles, $type) = @_;
+  my $bwFiles = $expectedUdFiles->{$type};
+
   foreach my $udId (sort keys %$importedUds) {
     my $status = checkUdFiles($udId, $targetDir, $bwFiles);
     if ($status->{missingDir}) {
@@ -164,10 +170,11 @@ sub testBigwig {
     my $missing = $status->{missingFiles};
     print STDOUT "$udId\t" . join(', ', @$missing) . "\n" if scalar @$missing;
   }
+  print STDOUT "\n";
 }
 
 sub testRnaSeq {
-  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $importedUds, $vdiStatus, $udStatus) = @_;
+  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $importedUds, $vdiStatus, $udStatus, $targetDir, $expectedUdFiles) = @_;
 
   my $vdiSql = "
 select id.udId, count(na_feat_expression_id)
@@ -193,6 +200,10 @@ group by p.user_dataset_id
 ";
 
   produceCountComparison($vdiSql, $udSql, "Rna Seq", $importedUds, $vdiStatus, $udStatus);
+
+  print STDOUT "MISSING RNASEQ FILES\n";
+  return testFiles($importedUds, $targetDir, $expectedUdFiles, 'RnaSeq');
+
 }
 
 sub produceCountComparison {
@@ -217,7 +228,7 @@ $vdiSql
     $importStatus = "import-invalid" unless $importInfo->{valid};
     my $msg = $importInfo->{msg};
     my $vdiInfo = $vdiStatusInfo->{$row[0]};
-    my $vdiStatus = "absent-install" unless $importStatus;
+    my $vdiStatus = "install-absent" unless $importStatus;
     if ($vdiInfo) {
       $vdiStatus = $vdiInfo->{status};
       $msg = $vdiInfo->{msg};
