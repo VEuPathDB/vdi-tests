@@ -10,7 +10,7 @@ for my $envVar (@envVars) { die "Missing env variable '$envVar'\n" unless $ENV{$
 
 my ($tinydbFilePath, $udJsonFilePath, $targetDir, $maxUdId, $vdiSchemaSuffix, $onlyDatasetIds) = @ARGV;
 
-die "Usage: testMigration tinydbFilePath targetDir udJsonFilePath maxUdId vdiSchemaSuffix [1 to report only dataset ids]\n" unless scalar(@ARGV) > 5;
+die "Usage: testMigration tinydbFilePath udJsonFilePath targetDir maxUdId vdiSchemaSuffix [1 to report only dataset ids]\n" unless scalar(@ARGV) > 5;
 
 die "Target dir '$targetDir' does not exist\n" unless -d $targetDir;
 
@@ -25,15 +25,15 @@ my $vdiControlSchema = "VDI_CONTROL_$vdiSchemaSuffix";
 my $idMapTable = "vdiUdIdMap_$vdiSchemaSuffix";
 
 my $importedUds = writeIdMapToDb($tinydbFilePath, $dbh, $idMapTable);
-my $expectedUdFiles = readUdJson($udJsonFilePath, $importedUds);
+my ($wdkUdIds, $expectedUdFiles) = readUdJson($udJsonFilePath, $importedUds);
 my $udStatus = findUdStatus($dbh);
 my $vdiStatus = findVdiStatus($dbh, $vdiControlSchema, $idMapTable);
 
-testGeneList($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $importedUds, $vdiStatus, $udStatus);
-testRnaSeq($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $importedUds, $vdiStatus, $udStatus, $targetDir, $expectedUdFiles);
+testGeneList($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $importedUds, $vdiStatus, $udStatus, $wdkUdIds);
+testRnaSeq($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $importedUds, $vdiStatus, $udStatus, $wdkUdIds, $targetDir, $expectedUdFiles);
 testBigwig($importedUds, $targetDir, $expectedUdFiles);
 
-# create table XXXXX ( udId number, vdiId varchar(100), isInvalid number);
+# create table XXXXX ( udId number, vdiId varchar(100), valid number);
 sub writeIdMapToDb {
   my ($tinydbFilePath, $dbh, $idMapTable) = @_;
 
@@ -68,8 +68,10 @@ sub readUdJson {
   my $wdk = decode_json($wdkJson);
 
   my $expectedUdFiles = {};
+  my $wdkUdIds = {};
   foreach my $ud (@$wdk) {
     my $type = $ud->{type}->{name};
+    $wdkUdIds->{$ud->{id}} = 1;
     next unless $type eq 'RnaSeq' or $type eq 'BigwigFiles';
     my $datafiles = $ud->{datafiles};
     $expectedUdFiles->{$type}->{$ud->{id}} = [];
@@ -80,7 +82,7 @@ sub readUdJson {
       push(@$files, $name);
     }
   }
-  return $expectedUdFiles;
+  return ($wdkUdIds, $expectedUdFiles);
 }
 
 sub findUdStatus {
@@ -128,7 +130,7 @@ my $sth = $dbh->prepare($sql);
 }
 
 sub testGeneList {
-  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $importedUds, $vdiStatus, $udStatus) = @_;
+  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $importedUds, $vdiStatus, $udStatus, $wdkUdIds) = @_;
 
   my $vdiSql = "
 select id.udId, count(gene_source_id)
@@ -147,7 +149,7 @@ and e.status = 'complete' and e.event_type = 'install'
 group by g.user_dataset_id
 ";
 
-  produceCountComparison($vdiSql, $udSql, "Gene List", $importedUds, $vdiStatus, $udStatus);
+  produceCountComparison($vdiSql, $udSql, "Gene List", $importedUds, $vdiStatus, $udStatus, $wdkUdIds);
 }
 
 sub testBigwig {
@@ -174,7 +176,7 @@ sub testFiles {
 }
 
 sub testRnaSeq {
-  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $importedUds, $vdiStatus, $udStatus, $targetDir, $expectedUdFiles) = @_;
+  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $importedUds, $vdiStatus, $udStatus, $wdkUdIds, $targetDir, $expectedUdFiles) = @_;
 
   my $vdiSql = "
 select id.udId, count(na_feat_expression_id)
@@ -199,7 +201,7 @@ and ex.protocol_app_node_id = n.protocol_app_node_id
 group by p.user_dataset_id
 ";
 
-  produceCountComparison($vdiSql, $udSql, "Rna Seq", $importedUds, $vdiStatus, $udStatus);
+  produceCountComparison($vdiSql, $udSql, "Rna Seq", $importedUds, $vdiStatus, $udStatus, $wdkUdIds);
 
   print STDOUT "MISSING RNASEQ FILES\n";
   return testFiles($importedUds, $targetDir, $expectedUdFiles, 'RnaSeq');
@@ -207,7 +209,7 @@ group by p.user_dataset_id
 }
 
 sub produceCountComparison {
-  my($vdiSql, $udSql, $udType, $importedUds, $vdiStatusInfo, $udStatusInfo) = @_;
+  my($vdiSql, $udSql, $udType, $importedUds, $vdiStatusInfo, $udStatusInfo, $wdkUdIds) = @_;
 
   my $sql = "$udSql
 MINUS
@@ -218,25 +220,29 @@ $vdiSql
   my $invalidCount;
   my $sth = $dbh->prepare($sql);
   $sth->execute();
-  print STDOUT "==== $udType - UD minus VDI ====\n";
+  print STDOUT "==== $udType - legacy minus VDI ====\n";
   print STDOUT "UD-ID\timport-status\tinstall-status\n";
   while (my @row = $sth->fetchrow_array) {
     $count += 1;
-    my $importInfo = $importedUds->{$row[0]};
+    my $udId = $row[0];
+    my $importInfo = $importedUds->{$udId};
     my $importStatus;
-    $importStatus = "import-missing" unless $importInfo;
-    $importStatus = "import-invalid" unless $importInfo->{valid};
+    if (!$importInfo) {
+      $importStatus = $wdkUdIds->{$udId}? "import-missing" : "wdk-missing";
+    } else {
+      $importStatus = "import-invalid" unless $importInfo->{valid};
+    }
     my $msg = $importInfo->{msg};
-    my $vdiInfo = $vdiStatusInfo->{$row[0]};
+    my $vdiInfo = $vdiStatusInfo->{$udId};
     my $vdiStatus = "install-absent" unless $importStatus;
     if ($vdiInfo) {
       $vdiStatus = $vdiInfo->{status};
       $msg = $vdiInfo->{msg};
     }
-    $invalidCount += $importedUds->{$row[0]};
+    $invalidCount += $importedUds->{$udId};
     print STDOUT join("\t", @row) . "\t$importStatus\t$vdiStatus\t$msg\n";
   }
-  print "$udType - UD minus VDI count: $count\n";
+  print "$udType - legacy minus VDI count: $count\n";
   print STDOUT "\n";
 
   my $sql = "$vdiSql
@@ -247,7 +253,7 @@ $udSql
   $count = 0;
   my $sth = $dbh->prepare($sql);
   $sth->execute();
-  print STDOUT "==== $udType - VDI minus UD ====\n";
+  print STDOUT "==== $udType - VDI minus legacy ====\n";
   print STDOUT "UD-ID\tUD-status\n";
   while (my @row = $sth->fetchrow_array) {
     my $msg = $udStatus->{$row[0]}? $udStatus->{$row[0]} : 'complete';
@@ -255,7 +261,7 @@ $udSql
     $count+=1;
   }
 
-  print "$udType - VDI minus UD count: $count\n";
+  print "$udType - VDI minus legacy count: $count\n";
   print STDOUT "\n";
 
 }
