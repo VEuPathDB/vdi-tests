@@ -31,6 +31,7 @@ my $vdiStatus = findVdiStatus($dbh, $vdiControlSchema, $idMapTable);
 
 testGeneList($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $importedUds, $vdiStatus, $udStatus, $wdkUdIds);
 testRnaSeq($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $importedUds, $vdiStatus, $udStatus, $wdkUdIds, $targetDir, $expectedUdFiles);
+testShares($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $importedUds, $vdiStatus, $udStatus, $wdkUdIds);
 testBigwig($importedUds, $targetDir, $expectedUdFiles);
 
 # create table XXXXX ( udId number, vdiId varchar(100), valid number);
@@ -89,14 +90,14 @@ sub findUdStatus {
   my ($dbh) = @_;
 
   my $sql = "
-select user_dataset_id from APIDBUSERDATASETS.installeduserdataset where is_invalid is not null
+select user_dataset_id, is_invalid from APIDBUSERDATASETS.installeduserdataset
 ";
 
   my $udStatus = {};
   my $sth = $dbh->prepare($sql);
   $sth->execute();
   while (my @row = $sth->fetchrow_array) {
-    $udStatus->{$row[0]} = "invalid";
+    $udStatus->{$row[0]} = $row[1]? "invalid" : "valid";
   }
   my $sql = "
 select user_dataset_id from APIDBUSERDATASETS.UserDatasetEvent where status != 'complete'
@@ -208,6 +209,26 @@ group by p.user_dataset_id
 
 }
 
+sub testShares {
+  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $importedUds, $vdiStatus, $udStatus, $wdkUdIds) = @_;
+
+  my $vdiSql = "
+select m.udId as user_dataset_id, user_id 
+from vdi_control_dev_s.dataset_visibility v, vdiUdIdMap_dev_s m
+where v.dataset_id = m.vdiId
+";
+
+  my $udSql = "
+select * from
+(select user_dataset_id, recipient_user_id from ApiDBUserDatasets.UserDatasetSharedWith
+union
+select user_dataset_id, user_id from ApiDBUserDatasets.UserDatasetOwner
+)
+";
+
+  produceCountComparison($vdiSql, $udSql, "Sharing", $importedUds, $vdiStatus, $udStatus, $wdkUdIds);
+}
+
 sub produceCountComparison {
   my($vdiSql, $udSql, $udType, $importedUds, $vdiStatusInfo, $udStatusInfo, $wdkUdIds) = @_;
 
@@ -256,7 +277,7 @@ $udSql
   print STDOUT "==== $udType - VDI minus legacy ====\n";
   print STDOUT "UD-ID\tUD-status\n";
   while (my @row = $sth->fetchrow_array) {
-    my $msg = $udStatus->{$row[0]}? $udStatus->{$row[0]} : 'complete';
+    my $msg = $udStatus->{$row[0]}? $udStatus->{$row[0]} : 'absent';
     print STDOUT join("\t", @row) . "\t$msg\n";
     $count+=1;
   }
