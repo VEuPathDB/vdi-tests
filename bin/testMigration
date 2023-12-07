@@ -8,9 +8,9 @@ use Data::Dumper;
 my @envVars = ('DB_NAME', 'DB_USER', 'DB_PASS');
 for my $envVar (@envVars) { die "Missing env variable '$envVar'\n" unless $ENV{$envVar}; }
 
-my ($tinydbFilePath, $udJsonFilePath, $targetDir, $maxUdId, $vdiSchemaSuffix, $onlyDatasetIds) = @ARGV;
+my ($tinydbFilePath, $udJsonFilePath, $targetDir, $maxUdId, $vdiSchemaSuffix, $dblinkName) = @ARGV;
 
-die "Usage: testMigration tinydbFilePath udJsonFilePath targetDir maxUdId vdiSchemaSuffix [1 to report only dataset ids]\n" unless scalar(@ARGV) > 5;
+die "Usage: testMigration tinydbFilePath udJsonFilePath targetDir maxUdId vdiSchemaSuffix [dblinkName]\n" unless scalar(@ARGV) > 4;
 
 die "Target dir '$targetDir' does not exist\n" unless -d $targetDir;
 
@@ -19,6 +19,8 @@ my $dbh = DBI->connect("dbi:Oracle:$ENV{DB_NAME}", $ENV{DB_USER}, $ENV{DB_PASS})
 
 $dbh->{RaiseError} = 1;
 $dbh->{LongTruncOk} = 1;
+
+my $DBLINK = "\@$dblinkName" if $dblinkName;
 
 my $vdiDatasetsSchema = "VDI_DATASETS_$vdiSchemaSuffix";
 my $vdiControlSchema = "VDI_CONTROL_$vdiSchemaSuffix";
@@ -29,9 +31,9 @@ my ($wdkUdIds, $expectedUdFiles) = readUdJson($udJsonFilePath, $importedUds);
 my $udStatus = findUdStatus($dbh);
 my $vdiStatus = findVdiStatus($dbh, $vdiControlSchema, $idMapTable);
 
-testGeneList($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $importedUds, $vdiStatus, $udStatus, $wdkUdIds);
-testRnaSeq($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $importedUds, $vdiStatus, $udStatus, $wdkUdIds, $targetDir, $expectedUdFiles);
-testShares($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $importedUds, $vdiStatus, $udStatus, $wdkUdIds);
+testGeneList($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiStatus, $udStatus, $wdkUdIds);
+testRnaSeq($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiStatus, $udStatus, $wdkUdIds, $targetDir, $expectedUdFiles);
+testShares($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiStatus, $udStatus, $wdkUdIds);
 testBigwig($importedUds, $targetDir, $expectedUdFiles);
 
 # create table XXXXX ( udId number, vdiId varchar(100), valid number);
@@ -90,7 +92,7 @@ sub findUdStatus {
   my ($dbh) = @_;
 
   my $sql = "
-select user_dataset_id, is_invalid from APIDBUSERDATASETS.installeduserdataset
+select user_dataset_id, is_invalid from APIDBUSERDATASETS.installeduserdataset$DBLINK
 ";
 
   my $udStatus = {};
@@ -100,7 +102,7 @@ select user_dataset_id, is_invalid from APIDBUSERDATASETS.installeduserdataset
     $udStatus->{$row[0]} = $row[1]? "invalid" : "valid";
   }
   my $sql = "
-select user_dataset_id from APIDBUSERDATASETS.UserDatasetEvent where status != 'complete'
+select user_dataset_id from APIDBUSERDATASETS.UserDatasetEvent$DBLINK where status != 'complete'
 ";
 
   my $udStatus = {};
@@ -131,7 +133,7 @@ my $sth = $dbh->prepare($sql);
 }
 
 sub testGeneList {
-  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $importedUds, $vdiStatus, $udStatus, $wdkUdIds) = @_;
+  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiStatus, $udStatus, $wdkUdIds) = @_;
 
   my $vdiSql = "
 select id.udId, count(gene_source_id)
@@ -143,7 +145,7 @@ group by id.udId
 
   my $udSql = "
 select g.user_dataset_id, count(gene_source_id)
-from apidbuserdatasets.ud_geneid g, apidbuserdatasets.UserDatasetEvent e
+from apidbuserdatasets.ud_geneid$DBLINK g, apidbuserdatasets.UserDatasetEvent$DBLINK e
 where g.user_dataset_id < $maxUdId
 and g.user_dataset_id = e.user_dataset_id
 and e.status = 'complete' and e.event_type = 'install'
@@ -177,7 +179,7 @@ sub testFiles {
 }
 
 sub testRnaSeq {
-  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $importedUds, $vdiStatus, $udStatus, $wdkUdIds, $targetDir, $expectedUdFiles) = @_;
+  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiStatus, $udStatus, $wdkUdIds, $targetDir, $expectedUdFiles) = @_;
 
   my $vdiSql = "
 select id.udId, count(na_feat_expression_id)
@@ -192,8 +194,8 @@ group by id.udId
 
   my $udSql = "
 select p.user_dataset_id, count(na_feat_expression_id)
-from apidbuserdatasets.ud_profileset p, apidbuserdatasets.UserDatasetEvent e,
-  apidbuserdatasets.ud_protocolappnode n, apidbuserdatasets.ud_nafeatureexpression ex
+from apidbuserdatasets.ud_profileset$DBLINK p, apidbuserdatasets.UserDatasetEvent$DBLINK e,
+  apidbuserdatasets.ud_protocolappnode$DBLINK n, apidbuserdatasets.ud_nafeatureexpression$DBLINK ex
 where p.user_dataset_id < $maxUdId
 and p.user_dataset_id = e.user_dataset_id
 and e.status = 'complete' and e.event_type = 'install'
@@ -210,7 +212,7 @@ group by p.user_dataset_id
 }
 
 sub testShares {
-  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $onlyDatasetIds, $importedUds, $vdiStatus, $udStatus, $wdkUdIds) = @_;
+  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiStatus, $udStatus, $wdkUdIds) = @_;
 
   my $vdiSql = "
 select m.udId as user_dataset_id, user_id 
@@ -220,9 +222,14 @@ where v.dataset_id = m.vdiId
 
   my $udSql = "
 select * from
-(select user_dataset_id, recipient_user_id from ApiDBUserDatasets.UserDatasetSharedWith
+(select user_dataset_id, recipient_user_id 
+from ApiDBUserDatasets.UserDatasetSharedWith$DBLINK
+where user_dataset_id < $maxUdId
 union
-select user_dataset_id, user_id from ApiDBUserDatasets.UserDatasetOwner
+select user_dataset_id, user_id
+from ApiDBUserDatasets.UserDatasetOwner$DBLINK
+where user_dataset_id < $maxUdId
+
 )
 ";
 
