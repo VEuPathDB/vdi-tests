@@ -102,7 +102,7 @@ select user_dataset_id, is_invalid from APIDBUSERDATASETS.installeduserdataset$D
     $udStatus->{$row[0]} = $row[1]? "invalid" : "valid";
   }
   my $sql = "
-select user_dataset_id from APIDBUSERDATASETS.UserDatasetEvent$DBLINK where status != 'complete'
+select user_dataset_id from APIDBUSERDATASETS.UserDatasetEvent$DBLINK where (status != 'complete' and event_type = 'install') or (event_type = 'uninstall' and status = 'complete')
 ";
 
   my $udStatus = {};
