@@ -33,7 +33,7 @@ my $vdiStatus = findVdiStatus($dbh, $vdiControlSchema, $idMapTable);
 
 testGeneList($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiStatus, $udStatus, $wdkUdIds);
 testRnaSeq($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiStatus, $udStatus, $wdkUdIds, $targetDir, $expectedUdFiles);
-testShares($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiStatus, $udStatus, $wdkUdIds);
+testShares($dbh, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiStatus, $udStatus, $wdkUdIds);
 testBigwig($importedUds, $targetDir, $expectedUdFiles);
 
 # create table XXXXX ( udId number, vdiId varchar(100), valid number);
@@ -212,11 +212,11 @@ group by p.user_dataset_id
 }
 
 sub testShares {
-  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiStatus, $udStatus, $wdkUdIds) = @_;
+  my ($dbh, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiStatus, $udStatus, $wdkUdIds) = @_;
 
   my $vdiSql = "
 select m.udId as user_dataset_id, user_id 
-from vdi_control_dev_s.dataset_visibility v, vdiUdIdMap_dev_s m
+from $vdiControlSchema.dataset_visibility v, $idMapTable m
 where v.dataset_id = m.vdiId
 ";
 
