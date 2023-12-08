@@ -52,7 +52,7 @@ sub writeIdMapToDb {
 EOF
 
   my $importedUds = {};
-  foreach my $record (keys $tiny) {
+  foreach my $record (keys %$tiny) {
     my $msg = $tiny->{$record}->{msg};
     my $valid = $msg? 0 : 1;
     my $udId = $tiny->{$record}->{udId};
