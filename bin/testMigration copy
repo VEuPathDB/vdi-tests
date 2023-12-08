@@ -14,7 +14,7 @@ die "Usage: testMigration tinydbFilePath udJsonFilePath targetDir maxUdId vdiSch
 
 die "Target dir '$targetDir' does not exist\n" unless -d $targetDir;
 
-my $dbh = DBI->connect("dbi:Oracle:$ENV{DB_NAME}", $ENV{DB_USER}, $ENV{DB_PASS})
+my $dbh = DBI->connect("dbi:Oracle://ares10.penn.apidb.org:1521/$ENV{DB_NAME}.upenn.edu", $ENV{DB_USER}, $ENV{DB_PASS})
     || die "Couldn't connect to database: " . DBI->errstr;
 
 $dbh->{RaiseError} = 1;
