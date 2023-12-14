@@ -143,7 +143,7 @@ and id.udId < $maxUdId
 group by id.udId
 ";
 
-  my $udSql = "
+  my $legacySql = "
 select g.user_dataset_id, count(gene_source_id)
 from apidbuserdatasets.ud_geneid$DBLINK g, apidbuserdatasets.UserDatasetEvent$DBLINK e
 where g.user_dataset_id < $maxUdId
@@ -152,7 +152,7 @@ and e.status = 'complete' and e.event_type = 'install'
 group by g.user_dataset_id
 ";
 
-  produceCountComparison($vdiSql, $udSql, "Gene List", $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
+  produceCountComparison($vdiSql, $legacySql, "Gene List", $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
 }
 
 sub testBigwig {
@@ -192,7 +192,7 @@ and e.protocol_app_node_id = n.protocol_app_node_id
 group by id.udId
 ";
 
-  my $udSql = "
+  my $legacySql = "
 select p.user_dataset_id, count(na_feat_expression_id)
 from apidbuserdatasets.ud_profileset$DBLINK p, apidbuserdatasets.UserDatasetEvent$DBLINK e,
   apidbuserdatasets.ud_protocolappnode$DBLINK n, apidbuserdatasets.ud_nafeatureexpression$DBLINK ex
@@ -204,7 +204,7 @@ and ex.protocol_app_node_id = n.protocol_app_node_id
 group by p.user_dataset_id
 ";
 
-  produceCountComparison($vdiSql, $udSql, "Rna Seq", $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
+  produceCountComparison($vdiSql, $legacySql, "Rna Seq", $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
 
   print STDOUT "MISSING RNASEQ FILES\n";
   return testFiles($importedUds, $targetDir, $expectedUdFiles, 'RnaSeq');
@@ -220,7 +220,7 @@ from $vdiControlSchema.dataset_visibility v, $idMapTable m
 where v.dataset_id = m.vdiId
 ";
 
-  my $udSql = "
+  my $legacySql = "
 select * from
 (select user_dataset_id, recipient_user_id 
 from ApiDBUserDatasets.UserDatasetSharedWith$DBLINK
@@ -233,13 +233,17 @@ where user_dataset_id < $maxUdId
 )
 ";
 
-  produceCountComparison($vdiSql, $udSql, "Sharing", $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
+  produceCountComparison($vdiSql, $legacySql, "Sharing", $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
 }
 
 sub produceCountComparison {
-  my($vdiSql, $udSql, $udType, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds) = @_;
+  my($vdiSql, $legacySql, $udType, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds) = @_;
 
-  my $sql = "$udSql
+  #############################################################
+  # run legacy MINUS VDI, and explain each row
+  #############################################################
+
+  my $sql = "$legacySql
 MINUS
 $vdiSql
 ";
@@ -276,9 +280,14 @@ $vdiSql
   print "$udType - legacy minus VDI count: $count\n";
   print STDOUT "\n";
 
+
+  #############################################################
+  # run VDI MINUS legacy, and explain each row
+  #############################################################
+
   my $sql = "$vdiSql
 MINUS
-$udSql
+$legacySql
 ";
 
   $count = 0;
