@@ -27,13 +27,13 @@ my $vdiControlSchema = "VDI_CONTROL_$vdiSchemaSuffix";
 my $idMapTable = "vdiUdIdMap_$vdiSchemaSuffix";
 
 my $importedUds = writeIdMapToDb($tinydbFilePath, $dbh, $idMapTable);
-my ($wdkUdIds, $expectedUdFiles) = readUdJson($udJsonFilePath, $importedUds);
-my $udStatus = findUdStatus($dbh);
-my $vdiStatus = findVdiStatus($dbh, $vdiControlSchema, $idMapTable);
+my ($wdkUdIds, $expectedUdFiles) = readWdkJson($udJsonFilePath, $importedUds);
+my $legacyInstallStatus = findLegaxyInstallStatus($dbh);
+my $vdiInstallStatus = findVdiInstallStatus($dbh, $vdiControlSchema, $idMapTable);
 
-testGeneList($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiStatus, $udStatus, $wdkUdIds);
-testRnaSeq($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiStatus, $udStatus, $wdkUdIds, $targetDir, $expectedUdFiles);
-testShares($dbh, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiStatus, $udStatus, $wdkUdIds);
+testGeneList($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
+testRnaSeq($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds, $targetDir, $expectedUdFiles);
+testShares($dbh, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
 testBigwig($importedUds, $targetDir, $expectedUdFiles);
 
 # create table XXXXX ( udId number, vdiId varchar(100), valid number);
@@ -62,7 +62,7 @@ EOF
   return $importedUds;
 }
 
-sub readUdJson {
+sub readWdkJson {
   my ($jsonFilePath, $importedUds) = @_;
 
   open my $fh, '<', $jsonFilePath or die "error opening $jsonFilePath: $!";
@@ -88,34 +88,34 @@ sub readUdJson {
   return ($wdkUdIds, $expectedUdFiles);
 }
 
-sub findUdStatus {
+sub findLegacyInstallStatus {
   my ($dbh) = @_;
 
   my $sql = "
 select user_dataset_id, is_invalid from APIDBUSERDATASETS.installeduserdataset$DBLINK
 ";
 
-  my $udStatus = {};
+  my $legacyInstallStatus = {};
   my $sth = $dbh->prepare($sql);
   $sth->execute();
   while (my @row = $sth->fetchrow_array) {
-    $udStatus->{$row[0]} = $row[1]? "invalid" : "valid";
+    $legacyInstallStatus->{$row[0]} = $row[1]? "invalid" : "valid";
   }
   my $sql = "
 select user_dataset_id from APIDBUSERDATASETS.UserDatasetEvent$DBLINK where (status != 'complete' and event_type = 'install') or (event_type = 'uninstall' and status = 'complete')
 ";
 
-  my $udStatus = {};
+  my $legacyInstallStatus = {};
   my $sth = $dbh->prepare($sql);
   $sth->execute();
   while (my @row = $sth->fetchrow_array) {
-    $udStatus->{$row[0]} = "incomplete";
+    $legacyInstallStatus->{$row[0]} = "incomplete";
   }
-  return $udStatus;
+  return $legacyInstallStatus;
 }
 
 
-sub findVdiStatus {
+sub findVdiInstallStatus {
   my ($dbh, $vdiControlSchema, $idMapTable) = @_;
   my $sql = "
 select ids.udid, status, message from $vdiControlSchema.dataset_install_message m, $idMapTable ids
@@ -123,17 +123,17 @@ where m.install_type = 'data'
 and ids.vdiid = m.dataset_id
 ";
 
-my $vdiStatus = {};
+my $vdiInstallStatus = {};
 my $sth = $dbh->prepare($sql);
   $sth->execute();
   while (my @row = $sth->fetchrow_array) {
-    $vdiStatus->{$row[0]} = {status=>$row[1], msg=>$row[2]};
+    $vdiInstallStatus->{$row[0]} = {status=>$row[1], msg=>$row[2]};
   }
-  return $vdiStatus;
+  return $vdiInstallStatus;
 }
 
 sub testGeneList {
-  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiStatus, $udStatus, $wdkUdIds) = @_;
+  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds) = @_;
 
   my $vdiSql = "
 select id.udId, count(gene_source_id)
@@ -152,7 +152,7 @@ and e.status = 'complete' and e.event_type = 'install'
 group by g.user_dataset_id
 ";
 
-  produceCountComparison($vdiSql, $udSql, "Gene List", $importedUds, $vdiStatus, $udStatus, $wdkUdIds);
+  produceCountComparison($vdiSql, $udSql, "Gene List", $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
 }
 
 sub testBigwig {
@@ -179,7 +179,7 @@ sub testFiles {
 }
 
 sub testRnaSeq {
-  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiStatus, $udStatus, $wdkUdIds, $targetDir, $expectedUdFiles) = @_;
+  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds, $targetDir, $expectedUdFiles) = @_;
 
   my $vdiSql = "
 select id.udId, count(na_feat_expression_id)
@@ -204,7 +204,7 @@ and ex.protocol_app_node_id = n.protocol_app_node_id
 group by p.user_dataset_id
 ";
 
-  produceCountComparison($vdiSql, $udSql, "Rna Seq", $importedUds, $vdiStatus, $udStatus, $wdkUdIds);
+  produceCountComparison($vdiSql, $udSql, "Rna Seq", $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
 
   print STDOUT "MISSING RNASEQ FILES\n";
   return testFiles($importedUds, $targetDir, $expectedUdFiles, 'RnaSeq');
@@ -212,7 +212,7 @@ group by p.user_dataset_id
 }
 
 sub testShares {
-  my ($dbh, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiStatus, $udStatus, $wdkUdIds) = @_;
+  my ($dbh, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds) = @_;
 
   my $vdiSql = "
 select m.udId as user_dataset_id, user_id 
@@ -233,11 +233,11 @@ where user_dataset_id < $maxUdId
 )
 ";
 
-  produceCountComparison($vdiSql, $udSql, "Sharing", $importedUds, $vdiStatus, $udStatus, $wdkUdIds);
+  produceCountComparison($vdiSql, $udSql, "Sharing", $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
 }
 
 sub produceCountComparison {
-  my($vdiSql, $udSql, $udType, $importedUds, $vdiStatusInfo, $udStatusInfo, $wdkUdIds) = @_;
+  my($vdiSql, $udSql, $udType, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds) = @_;
 
   my $sql = "$udSql
 MINUS
@@ -253,22 +253,25 @@ $vdiSql
   while (my @row = $sth->fetchrow_array) {
     $count += 1;
     my $udId = $row[0];
-    my $importInfo = $importedUds->{$udId};
-    my $importStatus;
+    my $importInfo = $importedUds->{$udId};   # the record from tinydb
+    my $importTag;                            # by default no tag, which means import was OK
     if (!$importInfo) {
-      $importStatus = $wdkUdIds->{$udId}? "import-missing" : "wdk-missing";
+      # if not in tinydb, then either WDK did not supply it, or it went missing during import
+      $importTag = $wdkUdIds->{$udId}? "import-missing" : "wdk-missing";
     } else {
-      $importStatus = "import-invalid" unless $importInfo->{valid};
+      $importTag = "import-invalid" unless $importInfo->{valid};
     }
-    my $msg = $importInfo->{msg};
-    my $vdiInfo = $vdiStatusInfo->{$udId};
-    my $vdiStatus = "install-absent" unless $importStatus;
-    if ($vdiInfo) {
-      $vdiStatus = $vdiInfo->{status};
-      $msg = $vdiInfo->{msg};
+    my $reportedMsg = $importInfo->{msg};   # the explanation provided by VDI
+    my $vdiInstallTag;
+    if ($vdiInstallStatus->{$udId}) {
+      $vdiInstallTag = $vdiInstallStatus->{$udId}->{status};
+      $reportedMsg = $vdiInstallStatus->{$udId}->{msg};
+    } else {
+      # if no record of install then apply a tag, unless explained by problem with import
+      $vdiInstallTag = "install-absent" unless $importTag;
     }
     $invalidCount += $importedUds->{$udId};
-    print STDOUT join("\t", @row) . "\t$importStatus\t$vdiStatus\t$msg\n";
+    print STDOUT join("\t", @row) . "\t$importTag\t$vdiInstallTag\t$reportedMsg\n";
   }
   print "$udType - legacy minus VDI count: $count\n";
   print STDOUT "\n";
@@ -284,7 +287,7 @@ $udSql
   print STDOUT "==== $udType - VDI minus legacy ====\n";
   print STDOUT "UD-ID\tUD-status\n";
   while (my @row = $sth->fetchrow_array) {
-    my $msg = $udStatus->{$row[0]}? $udStatus->{$row[0]} : 'absent';
+    my $msg = $legacyInstallStatus->{$row[0]}? $legacyInstallStatus->{$row[0]} : 'absent';
     print STDOUT join("\t", @row) . "\t$msg\n";
     $count+=1;
   }
