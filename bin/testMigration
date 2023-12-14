@@ -28,7 +28,7 @@ my $idMapTable = "vdiUdIdMap_$vdiSchemaSuffix";
 
 my $importedUds = writeIdMapToDb($tinydbFilePath, $dbh, $idMapTable);
 my ($wdkUdIds, $expectedUdFiles) = readWdkJson($udJsonFilePath, $importedUds);
-my $legacyInstallStatus = findLegaxyInstallStatus($dbh);
+my $legacyInstallStatus = findLegacyInstallStatus($dbh);
 my $vdiInstallStatus = findVdiInstallStatus($dbh, $vdiControlSchema, $idMapTable);
 
 testGeneList($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
