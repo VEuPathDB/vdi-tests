@@ -216,8 +216,8 @@ sub testShares {
 
   my $vdiSql = "
 select m.udId as user_dataset_id, user_id 
-from $vdiControlSchema.dataset_visibility v, $idMapTable m
-where v.dataset_id = m.vdiId
+from $vdiControlSchema.dataset_availability v, $idMapTable m
+where v.user_dataset_id = m.vdiId
 ";
 
   my $legacySql = "
