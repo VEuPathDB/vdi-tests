@@ -41,11 +41,11 @@ print("authTkt: " + authTkt, file=sys.stderr)
 
 class Migrator():
 
-    def migrate(self, tinyDbJsonFile, workingDir, udServiceUrl, vdiServiceUrl, vdiAdminAuthKey, countLimit, *targetProjects):
+    def migrate(self, tinyDbJsonFile, legacyUdJsonFile, workingDir, udServiceUrl, vdiServiceUrl, vdiAdminAuthKey, countLimit, *targetProjects):
 
         UD_HEADERS = {"Accept": "application/json", "Auth-Key": "dontcare", "originating-user-id": "dontcare", "Cookie": authTkt}
         UD_HEADERS_FILE = {"Auth-Key": "dontcare", "originating-user-id": "dontcare", "Cookie": authTkt}
-        VDI_HEADERS = {"Accept": "application/json", "Admin-Token": vdiAdminAuthKey, "User-ID": "?"}
+        VDI_HEADERS = {"Accept": "application/json", "Admin-Token": vdiAdminAuthKey, "User-ID": "?", "Cookie": authTkt}
 
         """
           In TinyDB we'll have two types of records.  Here are examples:
@@ -63,15 +63,9 @@ class Migrator():
         vdiDatasetsUrl = vdiServiceUrl + "/vdi-datasets"
 
         # first pass: for UD owner.  Get json with all UDs.  Then iterate.
-        udsJson = ""
-        try:
-            url = udServiceUrl + "/users/current/all-user-datasets"
-            response = requests.get(url, headers=UD_HEADERS, verify=SSL_VERIFY)
-            response.raise_for_status()
-            udsJson = response.json()
-            response.close()
-        except requests.exceptions.RequestException as e:
-            handleRequestException(e, url, "Posting metadata and data to VDI")
+        udsJson = {}
+        with open(legacyUdJsonFile) as file:
+            udsJson = json.loads(file.read())
 
         sortedUdsJson = sorted(udsJson, key=lambda d: d["id"])  # import in order of UD creation
         count = 0
@@ -85,7 +79,7 @@ class Migrator():
 
         for udJson in sortedUdsJson:
             udType = udJson["type"]["name"]
-            if udType != GENE_LIST and udType != RNA_SEQ and udType != BIGWIG:
+            if udType != RNA_SEQ and udType != BIGWIG and udType != GENE_LIST:
                 continue
             udId = udJson["id"]
             udUserId = int(udJson["userId"])
