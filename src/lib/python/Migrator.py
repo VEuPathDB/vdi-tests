@@ -257,7 +257,7 @@ def createBodyForPost(udJson):
     #print("depends: " + str(dependencies), file=sys.stderr)
     
     createdSeconds = udJson["created"] / 1000
-    dt = datetime.fromtimestamp(createdSeconds).astimezone()
+    dt = datetime.datetime.fromtimestamp(createdSeconds).astimezone()
     createdStr = dt.isoformat()
     for dependency in dependencies:
         del dependency["compatibilityInfo"]  # we don't use this in VDI
