@@ -8,6 +8,7 @@ import time
 import urllib
 import os
 import tarfile
+import datetime
 
 """
 - Maintains a private mapping of UD IDs to VDI IDs, using python's tinydb as storage system.
@@ -254,10 +255,15 @@ def createBodyForPost(udJson):
         origin = "galaxy"
     dependencies = udJson["dependencies"].copy()
     #print("depends: " + str(dependencies), file=sys.stderr)
+    
+    createdSeconds = udJson["created"] / 1000
+    dt = datetime.fromtimestamp(createdSeconds).astimezone()
+    createdStr = dt.isoformat()
     for dependency in dependencies:
         del dependency["compatibilityInfo"]  # we don't use this in VDI
     return {
         "name": udJson["meta"]["name"],
+        "createdOn": createdStr,
         "summary": udJson["meta"]["summary"],
         "dependencies": dependencies,
         "description": udJson["meta"]["description"],
