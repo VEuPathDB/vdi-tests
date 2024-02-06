@@ -131,6 +131,151 @@ my $sth = $dbh->prepare($sql);
   return $vdiInstallStatus;
 }
 
+sub testEda {
+  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds) = @_;
+
+  testEdaEntityTypeGraph($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
+  
+}
+
+sub testEdaEntityTypeGraph {
+  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds) = @_;
+
+  my $vdiSql = "
+select id.udId, e.stable_id, study_stable_id, parent_stable_id, internal_abbrev, description, display_name, display_name_plural, has_attribute_collections, is_many_to_one_with_parent, cardinality
+from $idMapTable id, $vdiDatasetsSchema.entitytypegraph e, $vdiDatasetsSchema.study s
+where s.user_dataset_id = id.vdiId
+and e.study_stable_id = s.stable_id
+and id.udId < $maxUdId
+group by id.udId
+";
+
+  my $legacySql = "
+select d.user_dataset_id, etg.stable_id, study_stable_id, parent_stable_id, internal_abbrev, description, display_name, display_name_plural, has_attribute_collections, is_many_to_one_with_parent, cardinality
+from apidbuserdatasets.datasetattributes$DBLINK d, apidbuserdatasets.entitytypegraph$DBLINK etg, apidbuserdatasets.UserDatasetEvent$DBLINK e
+where d.user_dataset_id < $maxUdId
+and d.study_stable_id = etg.study_stable_id
+and e.user_dataset_id = d.user_dataset_id
+and e.status = 'complete' and e.event_type = 'install'
+";
+
+  produceCountComparison($vdiSql, $legacySql, "EDA EntityTypeGraph", $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
+}
+
+# for those entities in EntityTypeGraph that are in common between legacy and VDI, check their study-specific tables
+# (ones that are not in common were reported above as issues)
+sub testEdaStudySpecificTables {
+  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus) = @_;
+
+  # return a list of (udId, studyId, entityId) to test
+  my @entities = findStudyEntities($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus);
+  my $count = scalar(@entities);
+  print "Found $count study-entities\n";
+
+  my $bumTablesCount = 0;
+  my @tableTypes = ('ancestors_', 'attributegraph_', 'attributes_', 'attributevalues_');
+  foreach my $tuple (@entities) {
+    my ($udId, $studyId, $entityId) = @$tuple;
+    foreach my $tableType (@tableTypes) {
+      my $suffix = "${studyId}_$entityId";
+      my $tableName = "${tableType}$suffix";
+      my $bumTable = testEdaStudySpecificTable($dbh, $vdiDatasetsSchema, $tableName);
+      $bumTablesCount += $bumTable;
+    }
+  }
+  print "Found $bumTablesCount bad tables out of " . ($count * scalar(@tableTypes)) . "\n";
+}
+
+# find (study, entity) tuples that are in common between legacy and VDI
+sub findStudyEntities {
+  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus) = @_;
+
+  my $vdiSql = "
+select id.udId, e.stable_id, study_stable_id
+from $idMapTable id, $vdiDatasetsSchema.entitytypegraph e, $vdiDatasetsSchema.study s
+where s.user_dataset_id = id.vdiId
+and e.study_stable_id = s.stable_id
+and id.udId < $maxUdId
+";
+
+  my $legacySql =  "
+select d.user_dataset_id, etg.stable_id, study_stable_id
+from apidbuserdatasets.datasetattributes$DBLINK d, apidbuserdatasets.entitytypegraph$DBLINK etg, apidbuserdatasets.UserDatasetEvent$DBLINK e
+where d.user_dataset_id < $maxUdId
+and d.study_stable_id = etg.study_stable_id
+and e.user_dataset_id = d.user_dataset_id
+and e.status = 'complete' and e.event_type = 'install'
+";
+
+  # find all studies / entities that are present in both legacy and vdi
+  my $sql = "$legacySql
+INTERSECT
+$vdiSql
+";
+
+  my $count;
+  my $sth = $dbh->prepare($sql);
+  $sth->execute();
+
+  my @commonStudyEntities;
+  # loop through all studies/entities, and generate table names for each
+  while (my ($udId, $studyId, $entityId) = $sth->fetchrow_array) {
+    $count += 1;
+    push(@commonStudyEntities, [$udId, $studyId, $entityId]);
+  }
+  $sth->close();
+  return @commonStudyEntities;
+}
+
+sub testEdaStudySpecificTable {
+  my ($dbh, $vdiDatasetsSchema, $tableName) = @_;
+
+  my @colNames = findVdiTableColumns($dbh, $vdiDatasetsSchema, $tableName);
+  my $colNamesStr = join(", ", @colNames);
+  my $vdiSql = "select $colNamesStr from $vdiDatasetsSchema.$tableName";
+  my $legacySql = "select $colNamesStr from apidbuserdatasets.$tableName$DBLINK";
+
+  my $sql = "$legacySql MINUS $vdiSql";
+  my $foundBad = runEdaMinus($dbh, $sql, $tableName, "Legacy minus VDI");
+  $sql = "$vdiSql MINUS $legacySql";
+  $foundBad += runEdaMinus($dbh, $sql, $tableName, "VDI minus Legacy");
+  return $foundBad;
+}
+
+sub runEdaMinus {
+  my ($dbh, $minusSql, $tableName, $title) = @_;
+
+  my $sth = $dbh->prepare($minusSql);
+  $sth->execute($minusSql);
+  my $foundBad = 0;
+  while (my @row = $sth->fetchrow_array) {
+    # write out header (once) only if we have some bummer rows
+    if (!$foundBad) {
+      print STDOUT "==== EDA $tableName - $title ====\n";
+      $foundBad = 1;
+    }
+    print join("\t", @row) . "\n";
+  }
+  $sth->close();
+  return $foundBad;
+}
+
+sub findVdiTableColumns {
+  my ($dbh, $vdiDatasetsSchema, $tableName) = @_;
+
+  my $sql = "select column_name from all_tab_columns where owner = upper('$vdiDatasetsSchema') and table_name = upper('$tableName')";
+
+  my $sth = $dbh->prepare($sql);
+  $sth->execute($sql);
+  my @columns;
+  while (my ($colName) = $sth->fetchrow_array) {
+    push(@columns, $colName);
+  }
+  $sth->close();
+  return @columns;
+}
+
+
 sub testGeneList {
   my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds) = @_;
 
