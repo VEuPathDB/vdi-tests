@@ -159,11 +159,11 @@ class Migrator():
         print("SUMMARY  Shared: " + str(shareCount) + "  Uploaded: " + str(count) + " Already migrated: " + str(alreadyCount) + " Ignored: " + str(ignoreCount), file=sys.stderr)
 
 def writeOwnerUdToTinyDb(tinyDb, udId, vdiId, invalidMessage):
-    t = datetime.now();
+    t = datetime.datetime.now();
     tinyDb.insert({'type': 'owner', 'udId': udId, 'vdiId': vdiId, 'msg': invalidMessage, 'time': t.ctime()})
 
 def writeRecipientUdToTinyDb(tinyDb, udId, vdiId, userId):
-    t = datetime.now();
+    t = datetime.datetime.now();
     tinyDb.insert({'type': 'recipient', 'udId': udId, 'vdiId': vdiId, 'recipientUserId': userId, 'time': t.ctime()})
 
 def alreadyMigrated(tinyDb, udId):
@@ -219,7 +219,7 @@ def downloadFiles(fileNames, userId, udId, downloadDir, udServiceUrl, udHeaders)
     print ("Download files: " + ', '.join(fileNames), file=sys.stderr)
     for fileName in fileNames:
         try:
-            url = udServiceUrl + "/users/current/user-datasets/admin/" + str(userId) + "/" + str(udId) + "/user-datafiles/" + fileName
+            url = udServiceUrl + "/users/current/user-datasets/admin/" + str(userId) + "/" + str(udId) + "/user-datafiles/" + urllib.parse.quote(fileName)
             request = urllib.request.Request(url, None, udHeaders)
             response = urllib.request.urlopen(request, timeout=180)
             data = response.read()
@@ -317,6 +317,9 @@ def checkUploadInprogress(vdiDatasetsUrl, vdiId, vdiHeaders):
             return (True, None)
         if json_blob["status"]["import"] == "invalid":
             print("Upload invalid: " + vdiId, file=sys.stderr)
+            return (True, handle_job_invalid_status(json_blob))
+        if json_blob["status"]["import"] == "failed":
+            print("Upload failed: " + vdiId, file=sys.stderr)
             return (True, handle_job_invalid_status(json_blob))
         return (False, None)  # status is awaiting or in progress
     except requests.exceptions.RequestException as e:
