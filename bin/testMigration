@@ -397,7 +397,7 @@ $vdiSql
   my $sth = $dbh->prepare($sql);
   $sth->execute();
   print STDOUT "==== $udType - legacy minus VDI ====\n";
-  print STDOUT "UD-ID\timport-status\tinstall-status\n";
+  print STDOUT "VDI-ID\tUD-ID\tcount\timport-status\tinstall-status\n";
   while (my @row = $sth->fetchrow_array) {
     $count += 1;
     my $udId = $row[0];
@@ -419,7 +419,7 @@ $vdiSql
       $vdiInstallTag = "install-absent" unless $importTag;
     }
     $invalidCount += $importedUds->{$udId};
-    print STDOUT join("\t", @row) . "\t$importTag\t$vdiInstallTag\t$reportedMsg\n";
+    print STDOUT $importedUds->{$udId}->{vdiId} . "\t" . join("\t", @row) . "\t$importTag\t$vdiInstallTag\t$reportedMsg\n";
   }
   print "$udType - legacy minus VDI count: $count\n";
   print STDOUT "\n";
@@ -438,10 +438,10 @@ $legacySql
   my $sth = $dbh->prepare($sql);
   $sth->execute();
   print STDOUT "==== $udType - VDI minus legacy ====\n";
-  print STDOUT "UD-ID\tUD-status\n";
+  print STDOUT "VDI-ID\tUD-ID\tcount\timport-status\tinstall-status\n";
   while (my @row = $sth->fetchrow_array) {
     my $msg = $legacyInstallStatus->{$row[0]}? $legacyInstallStatus->{$row[0]} : 'absent';
-    print STDOUT join("\t", @row) . "\t$msg\n";
+    print STDOUT $importedUds->{$row[0]}->{vdiId} . "\t" . join("\t", @row) . "\t$msg\n";
     $count+=1;
   }
 
