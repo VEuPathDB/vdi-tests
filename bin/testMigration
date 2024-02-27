@@ -135,7 +135,7 @@ sub testEda {
   my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds) = @_;
 
   testEdaEntityTypeGraph($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
-  
+  testEdaStudySpecificTables($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus);
 }
 
 sub testEdaEntityTypeGraph {
@@ -173,7 +173,7 @@ sub testEdaStudySpecificTables {
   print "Found $count study-entities\n";
 
   my $bumTablesCount = 0;
-  my @tableTypes = ('ancestors_', 'attributegraph_', 'attributes_', 'attributevalues_');
+  my @tableTypes = ('ancestors_', 'attributegraph_', 'attributes_', 'attributevalue_');
   foreach my $tuple (@entities) {
     my ($udId, $studyId, $entityId) = @$tuple;
     foreach my $tableType (@tableTypes) {
@@ -247,12 +247,12 @@ sub runEdaMinus {
 
   my $sth = $dbh->prepare($minusSql);
   $sth->execute($minusSql);
-  my $foundBad = 0;
+  my $wroteHeader = 0;
   while (my @row = $sth->fetchrow_array) {
     # write out header (once) only if we have some bummer rows
-    if (!$foundBad) {
+    if (!$wroteHeader) {
       print STDOUT "==== EDA $tableName - $title ====\n";
-      $foundBad = 1;
+      $wroteHeader = 1;
     }
     print join("\t", @row) . "\n";
   }
