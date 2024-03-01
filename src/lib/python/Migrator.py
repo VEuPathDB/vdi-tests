@@ -9,6 +9,7 @@ import urllib
 import os
 import tarfile
 import datetime
+import re
 
 """
 - Maintains a private mapping of UD IDs to VDI IDs, using python's tinydb as storage system.
@@ -189,7 +190,7 @@ def findFilesToMigrate(udId, udType, dataFileInfos):
             return None
         return dataFileNames
     elif udType == BIOM:
-        filtered = filter(lambda file: not (re.search('*.tsv', file) or re.search('*.json', file)), dataFileNames)
+        filtered = list(filter(lambda file: not (re.search('\.tsv$', file) or re.search('\.json$', file)), dataFileNames))
         if len(filtered) != 1:
             printBumUd(udId, udType, dataFileNames)
             return None
@@ -255,7 +256,7 @@ def createBodyForPost(udJson):
         origin = "galaxy"
     dependencies = udJson["dependencies"].copy()
     #print("depends: " + str(dependencies), file=sys.stderr)
-    
+
     createdSeconds = udJson["created"] / 1000
     dt = datetime.datetime.fromtimestamp(createdSeconds).astimezone()
     createdStr = dt.isoformat()
