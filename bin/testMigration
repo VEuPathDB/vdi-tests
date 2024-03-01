@@ -173,17 +173,15 @@ sub testEdaStudySpecificTables {
   print "Found $count study-entities\n";
 
   my $bumTablesCount = 0;
-  my @tableTypes = ('ancestors_', 'attributegraph_', 'attributes_', 'attributevalue_');
   foreach my $tuple (@entities) {
-    my ($udId, $studyId, $entityId) = @$tuple;
-    foreach my $tableType (@tableTypes) {
-      my $suffix = "${studyId}_$entityId";
-      my $tableName = "${tableType}$suffix";
-      my $bumTable = testEdaStudySpecificTable($dbh, $vdiDatasetsSchema, $tableName);
-      $bumTablesCount += $bumTable;
-    }
+    my ($udId, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId) = @$tuple;
+    print "Testing EDA | UD: $udId | vdi study: $vdiStudyId | legacy study: $legacyStudyId\n";
+    $bumTablesCount += testEdaAncestors($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId);
+    $bumTablesCount += testEdaAttributeGraph($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId);
+    $bumTablesCount += testEdaAttributeValue($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId);
+    $bumTablesCount += testEdaAttributes($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId);
   }
-  print "Found $bumTablesCount bad tables out of " . ($count * scalar(@tableTypes)) . "\n";
+  print "Found $bumTablesCount bad tables out of " . ($count * 4) . "\n";
 }
 
 # find (study, entity) tuples that are in common between legacy and VDI
@@ -227,18 +225,100 @@ $vdiSql
   return @commonStudyEntities;
 }
 
-sub testEdaStudySpecificTable {
-  my ($dbh, $vdiDatasetsSchema, $tableName) = @_;
+sub testEdaAncestors {
+  my ($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId) = @_;
 
-  my @colNames = findVdiTableColumns($dbh, $vdiDatasetsSchema, $tableName);
-  my $colNamesStr = join(", ", @colNames);
-  my $vdiSql = "select $colNamesStr from $vdiDatasetsSchema.$tableName";
-  my $legacySql = "select $colNamesStr from apidbuserdatasets.$tableName$DBLINK";
+  my $vdiSql = "
+select $vdiEntityId as ID from $vdiDatasetsSchema.ancestors_${vdiStudyId}_$vdiEntityId
+";
+
+  my $legacySql = "
+select $legacyEntityId as ID from apidbuserdatasets.ancestors_${legacyStudyId}_$legacyEntityId$DBLINK
+";
 
   my $sql = "$legacySql MINUS $vdiSql";
-  my $foundBad = runEdaMinus($dbh, $sql, $tableName, "Legacy minus VDI");
+  my $foundBad = runEdaMinus($dbh, $sql, "Ancestors", "Legacy minus VDI");
   $sql = "$vdiSql MINUS $legacySql";
-  $foundBad += runEdaMinus($dbh, $sql, $tableName, "VDI minus Legacy");
+  $foundBad += runEdaMinus($dbh, $sql, "Ancestors", "VDI minus Legacy");
+  return $foundBad;
+}
+
+sub testEdaAttributeValue {
+  my ($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId) = @_;
+
+  my $vdiSql = "
+select ${vdiEntityId}_stable_id as entity_id, attribute_stable_id, string_value, date_value, number_value
+from $vdiDatasetsSchema.attributevalue_${vdiStudyId}_$vdiEntityId
+";
+
+  my $legacySql = "
+select ${legacyEntityId}_stable_id as entity_id, attribute_stable_id, string_value, date_value, number_value
+from apidbuserdatasets.attributevalue_${legacyStudyId}_$legacyEntityId$DBLINK
+";
+
+  my $sql = "$legacySql MINUS $vdiSql";
+  my $foundBad = runEdaMinus($dbh, $sql, "AttributeValue", "Legacy minus VDI");
+  $sql = "$vdiSql MINUS $legacySql";
+  $foundBad += runEdaMinus($dbh, $sql, "AttributeValue", "VDI minus Legacy");
+  return $foundBad;
+}
+
+sub testEdaAttributeGraph {
+  my ($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId) = @_;
+
+  my $vdiSql = "
+select provider_label, display_name, definition, vocabulary, display_type, hidden, 
+display_order, display_range_min, display_range_max, range_min, range_max, bin_width_override, 
+bin_width_computed, mean, median, lower_quartile, upper_quartile, is_temporal, is_featured, 
+is_merge_key, impute_zero, is_repeated, variable_spec_to_impute_zeroes_for, has_study_dependent_vocabulary, 
+weighting_variable_spec, has_values, data_type, distinct_values_count, is_multi_valued, data_shape, unit, scale, precision 
+from $vdiDatasetsSchema.attributegraph_${vdiStudyId}_$vdiEntityId
+";
+
+  my $legacySql = "
+select provider_label, display_name, definition, vocabulary, display_type, hidden, 
+display_order, display_range_min, display_range_max, range_min, range_max, bin_width_override, 
+bin_width_computed, mean, median, lower_quartile, upper_quartile, is_temporal, is_featured, 
+is_merge_key, impute_zero, is_repeated, variable_spec_to_impute_zeroes_for, has_study_dependent_vocabulary, 
+weighting_variable_spec, has_values, data_type, distinct_values_count, is_multi_valued, data_shape, unit, scale, precision 
+from apidbuserdatasets.attributegraph_${legacyStudyId}_$legacyEntityId$DBLINK
+";
+
+  my $sql = "$legacySql MINUS $vdiSql";
+  my $foundBad = runEdaMinus($dbh, $sql, "AttributeGraph", "Legacy minus VDI");
+  $sql = "$vdiSql MINUS $legacySql";
+  $foundBad += runEdaMinus($dbh, $sql, "AttributeGraph", "VDI minus Legacy");
+  return $foundBad;
+}
+
+sub testEdaAttributes {
+  my ($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId) = @_;
+
+  my $vdiTableName = "$vdiDatasetsSchema.attributes_${vdiStudyId}_$vdiEntityId";
+  my @vdiColNames = sort(findTableColumns($dbh, $vdiDatasetsSchema, $vdiTableName, ""));
+  my $legacyTableName = "apidbuserdatasets.attributes_${legacyStudyId}_$legacyEntityId";
+  my @legacyColNames = sort(findTableColumns($dbh, 'apidbuserdatasets', $legacyTableName, $DBLINK));
+
+  if (scalar(@vdiColNames) == scalar(@legacyColNames)) {
+    print "Attribute table column counts disagree\n";
+    return 1;
+  }
+
+  foreach my $col (@vdiColNames) {
+    if ($col ne shift(@legacyColNames)) {
+      print "Attribute table has different column names\n";
+      return 1;
+    }
+  }
+  
+  my $colNamesStr = join(", ", @vdiColNames);
+  my $vdiSql = "select $colNamesStr from $vdiDatasetsSchema.$vdiTableName";
+  my $legacySql = "select $colNamesStr from apidbuserdatasets.$legacyTableName$DBLINK";
+
+  my $sql = "$legacySql MINUS $vdiSql";
+  my $foundBad = runEdaMinus($dbh, $sql, "Attributes", "Legacy minus VDI");
+  $sql = "$vdiSql MINUS $legacySql";
+  $foundBad += runEdaMinus($dbh, $sql, "Attributes", "VDI minus Legacy");
   return $foundBad;
 }
 
@@ -257,13 +337,13 @@ sub runEdaMinus {
     print join("\t", @row) . "\n";
   }
   $sth->close();
-  return $foundBad;
+  return $wroteHeader;
 }
 
-sub findVdiTableColumns {
-  my ($dbh, $vdiDatasetsSchema, $tableName) = @_;
+sub findTableColumns {
+  my ($dbh, $schema, $tableName, $dblink) = @_;
 
-  my $sql = "select column_name from all_tab_columns where owner = upper('$vdiDatasetsSchema') and table_name = upper('$tableName')";
+  my $sql = "select column_name from all_tab_columns$dblink where owner = upper('$schema') and table_name = upper('$tableName')";
 
   my $sth = $dbh->prepare($sql);
   $sth->execute($sql);
