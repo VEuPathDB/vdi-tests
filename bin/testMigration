@@ -161,7 +161,6 @@ and e.user_dataset_id = d.user_dataset_id
 and e.status = 'complete' and e.event_type = 'install'
 ";
 
-print STDERR "\n" . $vdiSql . "\n" . $legacySql . "\n";
   produceCountComparison($vdiSql, $legacySql, "EDA EntityTypeGraph", $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
 }
 
@@ -192,12 +191,14 @@ sub findStudyEntities {
   my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus) = @_;
 
   my $sql = "
-select id.udId, etg.stable_id as v_stable_id, etg.study_stable_id as v_study_stable_id, legacy.stable_id as l_stable_id, legacy.study_stable_id as l_study_stable_id
+select distinct id.udId, etg.internal_abbrev as v_internal_abbrev, s.internal_abbrev as v_study_internal_abbrev, legacy.internal_abbrev as l_internal_abbrev, legacy.study_internal_abbrev as l_study_internal_abbrev
 from $idMapTable id, $vdiDatasetsSchema.entitytypegraph etg, $vdiDatasetsSchema.study s,
-(select d.user_dataset_id, etg.stable_id, etg.study_stable_id
- from apidbuserdatasets.datasetattributes$DBLINK d, apidbuserdatasets.entitytypegraph$DBLINK etg, apidbuserdatasets.UserDatasetEvent$DBLINK e
+(select d.user_dataset_id, etg.internal_abbrev, s.internal_abbrev as study_internal_abbrev
+ from apidbuserdatasets.datasetattributes$DBLINK d, apidbuserdatasets.entitytypegraph$DBLINK etg, 
+ apidbuserdatasets.UserDatasetEvent$DBLINK e, apidbuserdatasets.study s
  where d.user_dataset_id < $maxUdId
  and d.study_stable_id = etg.study_stable_id
+ and d.study_stable_id = s.stable_id
  and e.user_dataset_id = d.user_dataset_id
  and e.status = 'complete' and e.event_type = 'install'
 ) legacy
@@ -206,47 +207,15 @@ and legacy.user_dataset_id = id.udId
 and etg.study_stable_id = s.stable_id
 and id.udId < $maxUdId
 ";
-
-  my $legacySql =  "
-select d.user_dataset_id, etg.stable_id, etg.study_stable_id
-from apidbuserdatasets.datasetattributes$DBLINK d, apidbuserdatasets.entitytypegraph$DBLINK etg, apidbuserdatasets.UserDatasetEvent$DBLINK e
-where d.user_dataset_id < $maxUdId
-and d.study_stable_id = etg.study_stable_id
-and e.user_dataset_id = d.user_dataset_id
-and e.status = 'complete' and e.event_type = 'install'
-";
-  my $vdiSql = "
-select id.udId, etg.stable_id, etg.study_stable_id
-from $idMapTable id, $vdiDatasetsSchema.entitytypegraph etg, $vdiDatasetsSchema.study s
-where s.user_dataset_id = id.vdiId
-and etg.study_stable_id = s.stable_id
-and id.udId < $maxUdId
-";
-
-  my $legacySql =  "
-select d.user_dataset_id, etg.stable_id, etg.study_stable_id
-from apidbuserdatasets.datasetattributes$DBLINK d, apidbuserdatasets.entitytypegraph$DBLINK etg, apidbuserdatasets.UserDatasetEvent$DBLINK e
-where d.user_dataset_id < $maxUdId
-and d.study_stable_id = etg.study_stable_id
-and e.user_dataset_id = d.user_dataset_id
-and e.status = 'complete' and e.event_type = 'install'
-";
-
-  # find all studies / entities that are present in both legacy and vdi
-  my $sql1 = "$legacySql
-INTERSECT
-$vdiSql
-";
-
   my $count;
   my $sth = $dbh->prepare($sql);
   $sth->execute();
 
   my @commonStudyEntities;
   # loop through all studies/entities, and generate table names for each
-  while (my ($udId, $studyId, $entityId) = $sth->fetchrow_array) {
+  while (my ($udId, $v_entityId, $v_studyId, $l_entity_id, $l_study_id) = $sth->fetchrow_array) {
     $count += 1;
-    push(@commonStudyEntities, [$udId, $studyId, $entityId]);
+    push(@commonStudyEntities, [$udId, $v_studyId, $v_entityId, $l_study_id, $l_entity_id]);
   }
   return @commonStudyEntities;
 }
@@ -255,11 +224,11 @@ sub testEdaAncestors {
   my ($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId) = @_;
 
   my $vdiSql = "
-select $vdiEntityId as ID from $vdiDatasetsSchema.ancestors_${vdiStudyId}_$vdiEntityId
+select ${vdiEntityId}_stable_id as ID from $vdiDatasetsSchema.ancestors_${vdiStudyId}_$vdiEntityId
 ";
 
   my $legacySql = "
-select $legacyEntityId as ID from apidbuserdatasets.ancestors_${legacyStudyId}_$legacyEntityId$DBLINK
+select ${legacyEntityId}_stable_id as ID from apidbuserdatasets.ancestors_${legacyStudyId}_$legacyEntityId$DBLINK
 ";
 
   my $sql = "$legacySql MINUS $vdiSql";
@@ -320,23 +289,23 @@ from apidbuserdatasets.attributegraph_${legacyStudyId}_$legacyEntityId$DBLINK
 sub testEdaAttributes {
   my ($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId) = @_;
 
-  my $vdiTableName = "$vdiDatasetsSchema.attributes_${vdiStudyId}_$vdiEntityId";
+  my $vdiTableName = "attributes_${vdiStudyId}_$vdiEntityId";
   my @vdiColNames = sort(findTableColumns($dbh, $vdiDatasetsSchema, $vdiTableName, ""));
-  my $legacyTableName = "apidbuserdatasets.attributes_${legacyStudyId}_$legacyEntityId";
+  my $legacyTableName = "attributes_${legacyStudyId}_$legacyEntityId$DBLINK";
   my @legacyColNames = sort(findTableColumns($dbh, 'apidbuserdatasets', $legacyTableName, $DBLINK));
 
-  if (scalar(@vdiColNames) == scalar(@legacyColNames)) {
-    print "Attribute table column counts disagree\n";
+  if (scalar(@vdiColNames) != scalar(@legacyColNames)) {
+    print "Attributes table column counts disagree\n";
     return 1;
   }
 
   foreach my $col (@vdiColNames) {
     if ($col ne shift(@legacyColNames)) {
-      print "Attribute table has different column names\n";
+      print "Attributes tables have different column names\n";
       return 1;
     }
   }
-  
+
   my $colNamesStr = join(", ", @vdiColNames);
   my $vdiSql = "select $colNamesStr from $vdiDatasetsSchema.$vdiTableName";
   my $legacySql = "select $colNamesStr from apidbuserdatasets.$legacyTableName$DBLINK";
@@ -352,7 +321,7 @@ sub runEdaMinus {
   my ($dbh, $minusSql, $tableName, $title) = @_;
 
   my $sth = $dbh->prepare($minusSql);
-  $sth->execute($minusSql);
+  $sth->execute();
   my $wroteHeader = 0;
   while (my @row = $sth->fetchrow_array) {
     # write out header (once) only if we have some bummer rows
@@ -371,7 +340,7 @@ sub findTableColumns {
   my $sql = "select column_name from all_tab_columns$dblink where owner = upper('$schema') and table_name = upper('$tableName')";
 
   my $sth = $dbh->prepare($sql);
-  $sth->execute($sql);
+  $sth->execute();
   my @columns;
   while (my ($colName) = $sth->fetchrow_array) {
     push(@columns, $colName);
@@ -496,7 +465,7 @@ MINUS
 $vdiSql
 ";
 
-  my $count;
+  my $count = 0;
   my $invalidCount;
   my $sth = $dbh->prepare($sql);
   $sth->execute();
