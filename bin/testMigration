@@ -221,7 +221,7 @@ and id.udId < $maxUdId
 }
 
 sub testEdaAncestors {
-  my ($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId) = @_;
+  my ($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId, $udId) = @_;
 
   my $vdiSql = "
 select ${vdiEntityId}_stable_id as ID from $vdiDatasetsSchema.ancestors_${vdiStudyId}_$vdiEntityId
@@ -232,14 +232,14 @@ select ${legacyEntityId}_stable_id as ID from apidbuserdatasets.ancestors_${lega
 ";
 
   my $sql = "$legacySql MINUS $vdiSql";
-  my $foundBad = runEdaMinus($dbh, $sql, "Ancestors", "Legacy minus VDI");
+  my $foundBad = runEdaMinus($dbh, $sql, "Ancestors", "Legacy minus VDI", $udId);
   $sql = "$vdiSql MINUS $legacySql";
-  $foundBad += runEdaMinus($dbh, $sql, "Ancestors", "VDI minus Legacy");
+  $foundBad |= runEdaMinus($dbh, $sql, "Ancestors", "VDI minus Legacy", $udId);
   return $foundBad;
 }
 
 sub testEdaAttributeValue {
-  my ($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId) = @_;
+  my ($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId, $udId) = @_;
 
   my $vdiSql = "
 select ${vdiEntityId}_stable_id as entity_id, attribute_stable_id, string_value, date_value, number_value
@@ -252,14 +252,14 @@ from apidbuserdatasets.attributevalue_${legacyStudyId}_$legacyEntityId$DBLINK
 ";
 
   my $sql = "$legacySql MINUS $vdiSql";
-  my $foundBad = runEdaMinus($dbh, $sql, "AttributeValue", "Legacy minus VDI");
+  my $foundBad = runEdaMinus($dbh, $sql, "AttributeValue", "Legacy minus VDI", $udId);
   $sql = "$vdiSql MINUS $legacySql";
-  $foundBad += runEdaMinus($dbh, $sql, "AttributeValue", "VDI minus Legacy");
+  $foundBad |= runEdaMinus($dbh, $sql, "AttributeValue", "VDI minus Legacy", $udId);
   return $foundBad;
 }
 
 sub testEdaAttributeGraph {
-  my ($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId) = @_;
+  my ($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId, $udId) = @_;
 
   my $vdiSql = "
 select provider_label, display_name, definition, vocabulary, display_type, hidden, 
@@ -280,14 +280,14 @@ from apidbuserdatasets.attributegraph_${legacyStudyId}_$legacyEntityId$DBLINK
 ";
 
   my $sql = "$legacySql MINUS $vdiSql";
-  my $foundBad = runEdaMinus($dbh, $sql, "AttributeGraph", "Legacy minus VDI");
+  my $foundBad = runEdaMinus($dbh, $sql, "AttributeGraph", "Legacy minus VDI", $udId);
   $sql = "$vdiSql MINUS $legacySql";
-  $foundBad += runEdaMinus($dbh, $sql, "AttributeGraph", "VDI minus Legacy");
+  $foundBad |= runEdaMinus($dbh, $sql, "AttributeGraph", "VDI minus Legacy", $udId);
   return $foundBad;
 }
 
 sub testEdaAttributes {
-  my ($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId) = @_;
+  my ($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId, $udId) = @_;
 
   my $vdiTableName = "attributes_${vdiStudyId}_$vdiEntityId";
   my @vdiColNames = sort(findTableColumns($dbh, $vdiDatasetsSchema, $vdiTableName, ""));
@@ -311,14 +311,14 @@ sub testEdaAttributes {
   my $legacySql = "select $colNamesStr from apidbuserdatasets.$legacyTableName$DBLINK";
 
   my $sql = "$legacySql MINUS $vdiSql";
-  my $foundBad = runEdaMinus($dbh, $sql, "Attributes", "Legacy minus VDI");
+  my $foundBad = runEdaMinus($dbh, $sql, "Attributes", "Legacy minus VDI", $udId);
   $sql = "$vdiSql MINUS $legacySql";
-  $foundBad += runEdaMinus($dbh, $sql, "Attributes", "VDI minus Legacy");
+  $foundBad |= runEdaMinus($dbh, $sql, "Attributes", "VDI minus Legacy", $udId);
   return $foundBad;
 }
 
 sub runEdaMinus {
-  my ($dbh, $minusSql, $tableName, $title) = @_;
+  my ($dbh, $minusSql, $tableName, $title, $udId) = @_;
 
   my $sth = $dbh->prepare($minusSql);
   $sth->execute();
@@ -326,7 +326,7 @@ sub runEdaMinus {
   while (my @row = $sth->fetchrow_array) {
     # write out header (once) only if we have some bummer rows
     if (!$wroteHeader) {
-      print STDOUT "==== EDA $tableName - $title ====\n";
+      print STDOUT "==== EDA $tableName - $title - UD ID: $udId ====\n";
       $wroteHeader = 1;
     }
     print join("\t", @row) . "\n";
