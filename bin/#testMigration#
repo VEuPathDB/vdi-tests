@@ -1,0 +1,548 @@
+
+#!/usr/bin/perl
+
+use strict;
+use DBI;
+use JSON qw( decode_json );
+use Data::Dumper;
+
+my @envVars = ('DB_NAME', 'DB_USER', 'DB_PASS');
+for my $envVar (@envVars) { die "Missing env variable '$envVar'\n" unless $ENV{$envVar}; }
+
+my ($tinydbFilePath, $udJsonFilePath, $targetDir, $maxUdId, $vdiSchemaSuffix, $dblinkName) = @ARGV;
+
+die "Usage: testMigration tinydbFilePath udJsonFilePath targetDir maxUdId vdiSchemaSuffix [dblinkName]\n" unless scalar(@ARGV) > 4;
+
+die "Target dir '$targetDir' does not exist\n" unless -d $targetDir;
+
+my $dbh = DBI->connect("dbi:Oracle:$ENV{DB_NAME}", $ENV{DB_USER}, $ENV{DB_PASS})
+    || die "Couldn't connect to database: " . DBI->errstr;
+
+$dbh->{RaiseError} = 1;
+$dbh->{LongTruncOk} = 1;
+
+my $DBLINK = "\@$dblinkName" if $dblinkName;
+
+my $vdiDatasetsSchema = "VDI_DATASETS_$vdiSchemaSuffix";
+my $vdiControlSchema = "VDI_CONTROL_$vdiSchemaSuffix";
+my $idMapTable = "vdiUdIdMap_$vdiSchemaSuffix";
+
+my $importedUds = writeIdMapToDb($tinydbFilePath, $dbh, $idMapTable);
+my ($wdkUdIds, $expectedUdFiles) = readWdkJson($udJsonFilePath, $importedUds);
+my $legacyInstallStatus = findLegacyInstallStatus($dbh);
+my $vdiInstallStatus = findVdiInstallStatus($dbh, $vdiControlSchema, $idMapTable);
+
+testEda($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
+exit 0;
+
+testGeneList($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
+testRnaSeq($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds, $targetDir, $expectedUdFiles);
+testShares($dbh, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
+testBigwig($importedUds, $targetDir, $expectedUdFiles);
+
+# create table XXXXX ( udId number, vdiId varchar(100), valid number);
+sub writeIdMapToDb {
+  my ($tinydbFilePath, $dbh, $idMapTable) = @_;
+
+  open my $fh, '<', $tinydbFilePath or die "error opening $tinydbFilePath: $!";
+  my $tinyJson = do { local $/; <$fh> };
+
+  my $tiny = decode_json($tinyJson)->{'_default'};
+  $dbh->do("truncate table $idMapTable");
+
+  my $sth = $dbh->prepare(<<EOF);
+    INSERT INTO $idMapTable
+    VALUES (?,?,?)
+EOF
+
+  my $importedUds = {};
+  foreach my $record (keys %$tiny) {
+    my $msg = $tiny->{$record}->{msg};
+    my $valid = $msg? 0 : 1;
+    my $udId = $tiny->{$record}->{udId};
+    $sth->execute($udId, $tiny->{$record}->{vdiId}, $valid);
+    $importedUds->{$udId} = {valid=>$valid, msg=>$msg, vdiId=>$tiny->{$record}->{vdiId}};
+  }
+  return $importedUds;
+}
+
+sub readWdkJson {
+  my ($jsonFilePath, $importedUds) = @_;
+
+  open my $fh, '<', $jsonFilePath or die "error opening $jsonFilePath: $!";
+  my $wdkJson = do { local $/; <$fh> };
+
+  my $wdk = decode_json($wdkJson);
+
+  my $expectedUdFiles = {};
+  my $wdkUdIds = {};
+  foreach my $ud (@$wdk) {
+    my $type = $ud->{type}->{name};
+    $wdkUdIds->{$ud->{id}} = 1;
+    next unless $type eq 'RnaSeq' or $type eq 'BigwigFiles';
+    my $datafiles = $ud->{datafiles};
+    $expectedUdFiles->{$type}->{$ud->{id}} = [];
+    my $files = $expectedUdFiles->{$type}->{$ud->{id}};
+    foreach my $datafile (@$datafiles) {
+      my $name = $datafile->{name};
+      next unless $name =~ /bw$/;
+      push(@$files, $name);
+    }
+  }
+  return ($wdkUdIds, $expectedUdFiles);
+}
+
+sub findLegacyInstallStatus {
+  my ($dbh) = @_;
+
+  my $sql = "
+select user_dataset_id, is_invalid from APIDBUSERDATASETS.installeduserdataset$DBLINK
+";
+
+  my $legacyInstallStatus = {};
+  my $sth = $dbh->prepare($sql);
+  $sth->execute();
+  while (my @row = $sth->fetchrow_array) {
+    $legacyInstallStatus->{$row[0]} = $row[1]? "invalid" : "valid";
+  }
+  my $sql = "
+select user_dataset_id from APIDBUSERDATASETS.UserDatasetEvent$DBLINK where (status != 'complete' and event_type = 'install') or (event_type = 'uninstall' and status = 'complete')
+";
+
+  my $sth = $dbh->prepare($sql);
+  $sth->execute();
+  while (my @row = $sth->fetchrow_array) {
+    $legacyInstallStatus->{$row[0]} = "incomplete";
+  }
+  return $legacyInstallStatus;
+}
+
+
+sub findVdiInstallStatus {
+  my ($dbh, $vdiControlSchema, $idMapTable) = @_;
+  my $sql = "
+select ids.udid, status, message from $vdiControlSchema.dataset_install_message m, $idMapTable ids
+where m.install_type = 'data'
+and ids.vdiid = m.dataset_id
+";
+
+my $vdiInstallStatus = {};
+my $sth = $dbh->prepare($sql);
+  $sth->execute();
+  while (my @row = $sth->fetchrow_array) {
+    $vdiInstallStatus->{$row[0]} = {status=>$row[1], msg=>$row[2]};
+  }
+  return $vdiInstallStatus;
+}
+
+sub testEda {
+  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds) = @_;
+
+  testEdaEntityTypeGraph($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
+  testEdaStudySpecificTables($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus);
+}
+
+sub testEdaEntityTypeGraph {
+  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds) = @_;
+
+  my $vdiSql = "
+select id.udId, etg.stable_id, etg.internal_abbrev, description, display_name, display_name_plural, has_attribute_collections, is_many_to_one_with_parent, cardinality
+from $idMapTable id, $vdiDatasetsSchema.entitytypegraph etg, $vdiDatasetsSchema.study s
+where s.user_dataset_id = id.vdiId
+and etg.study_stable_id = s.stable_id
+and id.udId < $maxUdId
+";
+
+  my $legacySql = "
+select d.user_dataset_id, etg.stable_id, internal_abbrev, etg.description, display_name, display_name_plural, has_attribute_collections, is_many_to_one_with_parent, cardinality
+from apidbuserdatasets.datasetattributes$DBLINK d, apidbuserdatasets.entitytypegraph$DBLINK etg, apidbuserdatasets.UserDatasetEvent$DBLINK e
+where d.user_dataset_id < $maxUdId
+and d.study_stable_id = etg.study_stable_id
+and e.user_dataset_id = d.user_dataset_id
+and e.status = 'complete' and e.event_type = 'install'
+";
+
+  produceCountComparison($vdiSql, $legacySql, "EDA EntityTypeGraph", $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
+}
+
+# for those entities in EntityTypeGraph that are in common between legacy and VDI, check their study-specific tables
+# (ones that are not in common were reported above as issues)
+sub testEdaStudySpecificTables {
+  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus) = @_;
+
+  # return a list of (udId, studyId, entityId) to test
+  my @entities = findStudyEntities($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus);
+  my $count = scalar(@entities);
+  print "Found $count study-entities\n";
+
+  my $bumTablesCount = 0;
+  foreach my $tuple (@entities) {
+    my ($udId, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId) = @$tuple;
+    print "Testing EDA | UD: $udId | vdi study: $vdiStudyId | legacy study: $legacyStudyId\n";
+    $bumTablesCount += testEdaAncestors($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId);
+    $bumTablesCount += testEdaAttributeGraph($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId);
+    $bumTablesCount += testEdaAttributeValue($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId);
+    $bumTablesCount += testEdaAttributes($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId);
+  }
+  print "Found $bumTablesCount bad tables out of " . ($count * 4) . "\n";
+}
+
+# find (study, entity) tuples that are in common between legacy and VDI
+sub findStudyEntities {
+  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus) = @_;
+
+  my $sql = "
+select distinct id.udId, etg.internal_abbrev as v_internal_abbrev, s.internal_abbrev as v_study_internal_abbrev, legacy.internal_abbrev as l_internal_abbrev, legacy.study_internal_abbrev as l_study_internal_abbrev
+from $idMapTable id, $vdiDatasetsSchema.entitytypegraph etg, $vdiDatasetsSchema.study s,
+(select d.user_dataset_id, etg.internal_abbrev, s.internal_abbrev as study_internal_abbrev
+ from apidbuserdatasets.datasetattributes$DBLINK d, apidbuserdatasets.entitytypegraph$DBLINK etg, 
+ apidbuserdatasets.UserDatasetEvent$DBLINK e, apidbuserdatasets.study s
+ where d.user_dataset_id < $maxUdId
+ and d.study_stable_id = etg.study_stable_id
+ and d.study_stable_id = s.stable_id
+ and e.user_dataset_id = d.user_dataset_id
+ and e.status = 'complete' and e.event_type = 'install'
+) legacy
+where s.user_dataset_id = id.vdiId
+and legacy.user_dataset_id = id.udId
+and etg.study_stable_id = s.stable_id
+and id.udId < $maxUdId
+";
+  my $count;
+  my $sth = $dbh->prepare($sql);
+  $sth->execute();
+
+  my @commonStudyEntities;
+  # loop through all studies/entities, and generate table names for each
+  while (my ($udId, $v_entityId, $v_studyId, $l_entity_id, $l_study_id) = $sth->fetchrow_array) {
+    $count += 1;
+    push(@commonStudyEntities, [$udId, $v_studyId, $v_entityId, $l_study_id, $l_entity_id]);
+  }
+  return @commonStudyEntities;
+}
+
+sub testEdaAncestors {
+  my ($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId) = @_;
+
+  my $vdiSql = "
+select ${vdiEntityId}_stable_id as ID from $vdiDatasetsSchema.ancestors_${vdiStudyId}_$vdiEntityId
+";
+
+  my $legacySql = "
+select ${legacyEntityId}_stable_id as ID from apidbuserdatasets.ancestors_${legacyStudyId}_$legacyEntityId$DBLINK
+";
+
+  my $sql = "$legacySql MINUS $vdiSql";
+  my $foundBad = runEdaMinus($dbh, $sql, "Ancestors", "Legacy minus VDI");
+  $sql = "$vdiSql MINUS $legacySql";
+  $foundBad += runEdaMinus($dbh, $sql, "Ancestors", "VDI minus Legacy");
+  return $foundBad;
+}
+
+sub testEdaAttributeValue {
+  my ($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId) = @_;
+
+  my $vdiSql = "
+select ${vdiEntityId}_stable_id as entity_id, attribute_stable_id, string_value, date_value, number_value
+from $vdiDatasetsSchema.attributevalue_${vdiStudyId}_$vdiEntityId
+";
+
+  my $legacySql = "
+select ${legacyEntityId}_stable_id as entity_id, attribute_stable_id, string_value, date_value, number_value
+from apidbuserdatasets.attributevalue_${legacyStudyId}_$legacyEntityId$DBLINK
+";
+
+  my $sql = "$legacySql MINUS $vdiSql";
+  my $foundBad = runEdaMinus($dbh, $sql, "AttributeValue", "Legacy minus VDI");
+  $sql = "$vdiSql MINUS $legacySql";
+  $foundBad += runEdaMinus($dbh, $sql, "AttributeValue", "VDI minus Legacy");
+  return $foundBad;
+}
+
+sub testEdaAttributeGraph {
+  my ($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId) = @_;
+
+  my $vdiSql = "
+select provider_label, display_name, definition, vocabulary, display_type, hidden, 
+display_order, display_range_min, display_range_max, range_min, range_max, bin_width_override, 
+bin_width_computed, mean, median, lower_quartile, upper_quartile, is_temporal, is_featured, 
+is_merge_key, impute_zero, is_repeated, variable_spec_to_impute_zeroes_for, has_study_dependent_vocabulary, 
+weighting_variable_spec, has_values, data_type, distinct_values_count, is_multi_valued, data_shape, unit, scale, precision 
+from $vdiDatasetsSchema.attributegraph_${vdiStudyId}_$vdiEntityId
+";
+
+  my $legacySql = "
+select provider_label, display_name, definition, vocabulary, display_type, hidden, 
+display_order, display_range_min, display_range_max, range_min, range_max, bin_width_override, 
+bin_width_computed, mean, median, lower_quartile, upper_quartile, is_temporal, is_featured, 
+is_merge_key, impute_zero, is_repeated, variable_spec_to_impute_zeroes_for, has_study_dependent_vocabulary, 
+weighting_variable_spec, has_values, data_type, distinct_values_count, is_multi_valued, data_shape, unit, scale, precision 
+from apidbuserdatasets.attributegraph_${legacyStudyId}_$legacyEntityId$DBLINK
+";
+
+  my $sql = "$legacySql MINUS $vdiSql";
+  my $foundBad = runEdaMinus($dbh, $sql, "AttributeGraph", "Legacy minus VDI");
+  $sql = "$vdiSql MINUS $legacySql";
+  $foundBad += runEdaMinus($dbh, $sql, "AttributeGraph", "VDI minus Legacy");
+  return $foundBad;
+}
+
+sub testEdaAttributes {
+  my ($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId) = @_;
+
+  my $vdiTableName = "attributes_${vdiStudyId}_$vdiEntityId";
+  my @vdiColNames = sort(findTableColumns($dbh, $vdiDatasetsSchema, $vdiTableName, ""));
+  my $legacyTableName = "attributes_${legacyStudyId}_$legacyEntityId$DBLINK";
+  my @legacyColNames = sort(findTableColumns($dbh, 'apidbuserdatasets', $legacyTableName, $DBLINK));
+
+  if (scalar(@vdiColNames) != scalar(@legacyColNames)) {
+    print "Attributes table column counts disagree\n";
+    return 1;
+  }
+
+  foreach my $col (@vdiColNames) {
+    if ($col ne shift(@legacyColNames)) {
+      print "Attributes tables have different column names\n";
+      return 1;
+    }
+  }
+
+  my $colNamesStr = join(", ", @vdiColNames);
+  my $vdiSql = "select $colNamesStr from $vdiDatasetsSchema.$vdiTableName";
+  my $legacySql = "select $colNamesStr from apidbuserdatasets.$legacyTableName$DBLINK";
+
+  my $sql = "$legacySql MINUS $vdiSql";
+  my $foundBad = runEdaMinus($dbh, $sql, "Attributes", "Legacy minus VDI");
+  $sql = "$vdiSql MINUS $legacySql";
+  $foundBad += runEdaMinus($dbh, $sql, "Attributes", "VDI minus Legacy");
+  return $foundBad;
+}
+
+sub runEdaMinus {
+  my ($dbh, $minusSql, $tableName, $title) = @_;
+
+  my $sth = $dbh->prepare($minusSql);
+  $sth->execute();
+  my $wroteHeader = 0;
+  while (my @row = $sth->fetchrow_array) {
+    # write out header (once) only if we have some bummer rows
+    if (!$wroteHeader) {
+      print STDOUT "==== EDA $tableName - $title ====\n";
+      $wroteHeader = 1;
+    }
+    print join("\t", @row) . "\n";
+  }
+  return $wroteHeader;
+}
+
+sub findTableColumns {
+  my ($dbh, $schema, $tableName, $dblink) = @_;
+
+  my $sql = "select column_name from all_tab_columns$dblink where owner = upper('$schema') and table_name = upper('$tableName')";
+
+  my $sth = $dbh->prepare($sql);
+  $sth->execute();
+  my @columns;
+  while (my ($colName) = $sth->fetchrow_array) {
+    push(@columns, $colName);
+  }
+  return @columns;
+}
+
+
+sub testGeneList {
+  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds) = @_;
+
+  my $vdiSql = "
+select id.udId, count(gene_source_id)
+from $idMapTable id, $vdiDatasetsSchema.ud_geneid g
+where g.user_dataset_id = id.vdiId
+and id.udId < $maxUdId
+group by id.udId
+";
+
+  my $legacySql = "
+select g.user_dataset_id, count(gene_source_id)
+from apidbuserdatasets.ud_geneid$DBLINK g, apidbuserdatasets.UserDatasetEvent$DBLINK e
+where g.user_dataset_id < $maxUdId
+and g.user_dataset_id = e.user_dataset_id
+and e.status = 'complete' and e.event_type = 'install'
+group by g.user_dataset_id
+";
+
+  produceCountComparison($vdiSql, $legacySql, "Gene List", $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
+}
+
+sub testBigwig {
+  my ($importedUds, $targetDir, $expectedUdFiles) = @_;
+
+  print STDOUT "MISSING BIGWIG FILES\n";
+  return testFiles($importedUds, $targetDir, $expectedUdFiles, 'BigwigFiles');
+}
+
+sub testFiles {
+  my ($importedUds, $targetDir, $expectedUdFiles, $type) = @_;
+  my $bwFiles = $expectedUdFiles->{$type};
+
+  foreach my $udId (sort keys %$importedUds) {
+    my $status = checkUdFiles($importedUds->{$udId}->{vdiId}, $targetDir, $bwFiles);
+    if ($status->{missingDir}) {
+      print STDOUT "$udId\tmissing-directory\n";
+      next;
+    }
+    my $missing = $status->{missingFiles};
+    print STDOUT "$udId\t" . join(', ', @$missing) . "\n" if scalar @$missing;
+  }
+  print STDOUT "\n";
+}
+
+sub testRnaSeq {
+  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds, $targetDir, $expectedUdFiles) = @_;
+
+  my $vdiSql = "
+select id.udId, count(na_feat_expression_id)
+from $idMapTable id, $vdiDatasetsSchema.ud_profileset p,
+  $vdiDatasetsSchema.ud_protocolappnode n, $vdiDatasetsSchema.ud_nafeatureexpression e
+where p.user_dataset_id = id.vdiId
+and id.udId < $maxUdId
+and n.profile_set_id = p.profile_set_id
+and e.protocol_app_node_id = n.protocol_app_node_id
+group by id.udId
+";
+
+  my $legacySql = "
+select p.user_dataset_id, count(na_feat_expression_id)
+from apidbuserdatasets.ud_profileset$DBLINK p, apidbuserdatasets.UserDatasetEvent$DBLINK e,
+  apidbuserdatasets.ud_protocolappnode$DBLINK n, apidbuserdatasets.ud_nafeatureexpression$DBLINK ex
+where p.user_dataset_id < $maxUdId
+and p.user_dataset_id = e.user_dataset_id
+and e.status = 'complete' and e.event_type = 'install'
+and n.profile_set_id = p.profile_set_id
+and ex.protocol_app_node_id = n.protocol_app_node_id
+group by p.user_dataset_id
+";
+
+  produceCountComparison($vdiSql, $legacySql, "Rna Seq", $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
+
+  print STDOUT "MISSING RNASEQ FILES\n";
+  return testFiles($importedUds, $targetDir, $expectedUdFiles, 'RnaSeq');
+
+}
+
+sub testShares {
+  my ($dbh, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds) = @_;
+
+  my $vdiSql = "
+select m.udId as user_dataset_id, user_id 
+from $vdiControlSchema.dataset_availability v, $idMapTable m
+where v.user_dataset_id = m.vdiId
+";
+
+  my $legacySql = "
+select * from
+(select user_dataset_id, recipient_user_id 
+from ApiDBUserDatasets.UserDatasetSharedWith$DBLINK
+where user_dataset_id < $maxUdId
+union
+select user_dataset_id, user_id
+from ApiDBUserDatasets.UserDatasetOwner$DBLINK
+where user_dataset_id < $maxUdId
+
+)
+";
+
+  produceCountComparison($vdiSql, $legacySql, "Sharing", $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
+}
+
+sub produceCountComparison {
+  my($vdiSql, $legacySql, $udType, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds) = @_;
+
+  #############################################################
+  # run legacy MINUS VDI, and explain each row
+  #############################################################
+
+  my $sql = "$legacySql
+MINUS
+$vdiSql
+";
+
+  my $count = 0;
+  my $invalidCount;
+  my $sth = $dbh->prepare($sql);
+  $sth->execute();
+  print STDOUT "==== $udType - legacy minus VDI ====\n";
+  print STDOUT "VDI-ID\tUD-ID\tcount\timport-status\tinstall-status\n";
+  while (my @row = $sth->fetchrow_array) {
+    $count += 1;
+    my $udId = $row[0];
+    my $importInfo = $importedUds->{$udId};   # the record from tinydb
+    my $importTag;                            # by default no tag, which means import was OK
+    if (!$importInfo) {
+      # if not in tinydb, then either WDK did not supply it, or it went missing during import
+      $importTag = $wdkUdIds->{$udId}? "import-missing" : "wdk-missing";
+    } else {
+      $importTag = "import-invalid" unless $importInfo->{valid};
+    }
+    my $reportedMsg = $importInfo->{msg};   # the explanation provided by VDI
+    my $vdiInstallTag;
+    if ($vdiInstallStatus->{$udId}) {
+      $vdiInstallTag = $vdiInstallStatus->{$udId}->{status};
+      $reportedMsg = $vdiInstallStatus->{$udId}->{msg};
+    } else {
+      # if no record of install then apply a tag, unless explained by problem with import
+      $vdiInstallTag = "install-absent" unless $importTag;
+    }
+    $invalidCount += $importedUds->{$udId};
+    print STDOUT $importedUds->{$udId}->{vdiId} . "\t" . join("\t", @row) . "\t$importTag\t$vdiInstallTag\t$reportedMsg\n";
+  }
+  print "$udType - legacy minus VDI count: $count\n";
+  print STDOUT "\n";
+
+
+  #############################################################
+  # run VDI MINUS legacy, and explain each row
+  #############################################################
+
+  my $sql = "$vdiSql
+MINUS
+$legacySql
+";
+
+  $count = 0;
+  my $sth = $dbh->prepare($sql);
+  $sth->execute();
+  print STDOUT "==== $udType - VDI minus legacy ====\n";
+  print STDOUT "VDI-ID\tUD-ID\tcount\timport-status\tinstall-status\n";
+  while (my @row = $sth->fetchrow_array) {
+    my $msg = $legacyInstallStatus->{$row[0]}? $legacyInstallStatus->{$row[0]} : 'absent';
+    print STDOUT $importedUds->{$row[0]}->{vdiId} . "\t" . join("\t", @row) . "\t$msg\n";
+    $count+=1;
+  }
+
+  print "$udType - VDI minus legacy count: $count\n";
+  print STDOUT "\n";
+
+}
+
+sub checkUdFiles {
+  my ($udId, $targetDir, $expectedUdFiles) = @_;
+
+  my $expectedFiles = $expectedUdFiles->{$udId};
+  my $return = {missingDir=>0, missingFiles=>[]};
+  unless ($expectedFiles && scalar @$expectedFiles) {
+    return $return;
+  }
+
+  unless (-d "$targetDir/$udId") {
+    $return->{missingDir} = 1;
+    return $return;
+  }
+  opendir my $dir, "$targetDir/$udId" or die "Cannot open directory $targetDir/$udId: $!";
+  my @foundFiles = readdir $dir;
+  closedir $dir;
+  foreach my $f (@$expectedFiles) {
+    my $missingFiles = $return->{missingFiles};
+    push(@$missingFiles, $f) unless grep(/^$f$/, @foundFiles);
+  }
+  return $return;
+}
