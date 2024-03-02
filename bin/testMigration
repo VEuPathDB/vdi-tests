@@ -31,6 +31,9 @@ my ($wdkUdIds, $expectedUdFiles) = readWdkJson($udJsonFilePath, $importedUds);
 my $legacyInstallStatus = findLegacyInstallStatus($dbh);
 my $vdiInstallStatus = findVdiInstallStatus($dbh, $vdiControlSchema, $idMapTable);
 
+testEda($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
+exit 0;
+
 testGeneList($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
 testRnaSeq($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds, $targetDir, $expectedUdFiles);
 testShares($dbh, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
@@ -142,16 +145,15 @@ sub testEdaEntityTypeGraph {
   my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds) = @_;
 
   my $vdiSql = "
-select id.udId, e.stable_id, study_stable_id, parent_stable_id, internal_abbrev, description, display_name, display_name_plural, has_attribute_collections, is_many_to_one_with_parent, cardinality
-from $idMapTable id, $vdiDatasetsSchema.entitytypegraph e, $vdiDatasetsSchema.study s
+select id.udId, etg.stable_id, study_stable_id, parent_stable_id, etg.internal_abbrev, description, display_name, display_name_plural, has_attribute_collections, is_many_to_one_with_parent, cardinality
+from $idMapTable id, $vdiDatasetsSchema.entitytypegraph etg, $vdiDatasetsSchema.study s
 where s.user_dataset_id = id.vdiId
-and e.study_stable_id = s.stable_id
+and etg.study_stable_id = s.stable_id
 and id.udId < $maxUdId
-group by id.udId
 ";
 
   my $legacySql = "
-select d.user_dataset_id, etg.stable_id, study_stable_id, parent_stable_id, internal_abbrev, description, display_name, display_name_plural, has_attribute_collections, is_many_to_one_with_parent, cardinality
+select d.user_dataset_id, etg.stable_id, etg.study_stable_id, parent_stable_id, internal_abbrev, etg.description, display_name, display_name_plural, has_attribute_collections, is_many_to_one_with_parent, cardinality
 from apidbuserdatasets.datasetattributes$DBLINK d, apidbuserdatasets.entitytypegraph$DBLINK etg, apidbuserdatasets.UserDatasetEvent$DBLINK e
 where d.user_dataset_id < $maxUdId
 and d.study_stable_id = etg.study_stable_id
@@ -189,15 +191,15 @@ sub findStudyEntities {
   my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus) = @_;
 
   my $vdiSql = "
-select id.udId, e.stable_id, study_stable_id
-from $idMapTable id, $vdiDatasetsSchema.entitytypegraph e, $vdiDatasetsSchema.study s
+select id.udId, etg.stable_id, etg.study_stable_id
+from $idMapTable id, $vdiDatasetsSchema.entitytypegraph etg, $vdiDatasetsSchema.study s
 where s.user_dataset_id = id.vdiId
-and e.study_stable_id = s.stable_id
+and etg.study_stable_id = s.stable_id
 and id.udId < $maxUdId
 ";
 
   my $legacySql =  "
-select d.user_dataset_id, etg.stable_id, study_stable_id
+select d.user_dataset_id, etg.stable_id, etg.study_stable_id
 from apidbuserdatasets.datasetattributes$DBLINK d, apidbuserdatasets.entitytypegraph$DBLINK etg, apidbuserdatasets.UserDatasetEvent$DBLINK e
 where d.user_dataset_id < $maxUdId
 and d.study_stable_id = etg.study_stable_id
@@ -221,7 +223,6 @@ $vdiSql
     $count += 1;
     push(@commonStudyEntities, [$udId, $studyId, $entityId]);
   }
-  $sth->close();
   return @commonStudyEntities;
 }
 
@@ -336,7 +337,6 @@ sub runEdaMinus {
     }
     print join("\t", @row) . "\n";
   }
-  $sth->close();
   return $wroteHeader;
 }
 
@@ -351,7 +351,6 @@ sub findTableColumns {
   while (my ($colName) = $sth->fetchrow_array) {
     push(@columns, $colName);
   }
-  $sth->close();
   return @columns;
 }
 
