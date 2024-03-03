@@ -178,10 +178,10 @@ sub testEdaStudySpecificTables {
   foreach my $tuple (@entities) {
     my ($udId, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId) = @$tuple;
     print "Testing EDA | UD: $udId | vdi study: $vdiStudyId | legacy study: $legacyStudyId\n";
-    $bumTablesCount += testEdaAncestors($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId);
-    $bumTablesCount += testEdaAttributeGraph($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId);
-    $bumTablesCount += testEdaAttributeValue($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId);
-    $bumTablesCount += testEdaAttributes($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId);
+    $bumTablesCount += testEdaAncestors($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId, $udId);
+    $bumTablesCount += testEdaAttributeGraph($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId, $udId);
+    $bumTablesCount += testEdaAttributeValue($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId, $udId);
+    $bumTablesCount += testEdaAttributes($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId, $udId);
   }
   print "Found $bumTablesCount bad tables out of " . ($count * 4) . "\n";
 }
