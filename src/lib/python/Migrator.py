@@ -81,8 +81,11 @@ class Migrator():
 
         for udJson in sortedUdsJson:
             udType = udJson["type"]["name"]
-            if udType != RNA_SEQ and udType != BIGWIG and udType != GENE_LIST:
+
+            # FIXME: REMOVE THIS IF CHECK FOR A FULL MIGRATION!
+            if udType != BIOM and udType != ISA:
                 continue
+
             udId = udJson["id"]
             udUserId = int(udJson["userId"])
             if len(udJson["projects"]) == 0:
@@ -102,7 +105,7 @@ class Migrator():
             if count >= int(countLimit):
                 break
             count += 1
-            print("Migrating UD: " + str(udId) + " " + udJson["projects"][0] + " " + udJson["type"]["name"], file=sys.stderr)
+            print("Migrating UD: " + str(udJson["ownerUserId"]) + "/" + str(udId) + " " + udJson["projects"][0] + " " + udJson["type"]["name"], file=sys.stderr)
             importFileNames = findFilesToMigrate(udId, udJson["type"]["name"], udJson["datafiles"])
             downloadDir = createDownloadDir(workingDir + "/download")
             downloadFiles(importFileNames, udUserId, udId, downloadDir, udServiceUrl, UD_HEADERS_FILE)
@@ -252,16 +255,21 @@ def createTarball(dirpath, tarFileName):
 
 def createBodyForPost(udJson):
     origin = "direct-upload"
+
     if udJson["type"]["name"] == "BigwigFiles" or udJson["type"]["name"] == "RnaSeq":
         origin = "galaxy"
+
     dependencies = udJson["dependencies"].copy()
-    #print("depends: " + str(dependencies), file=sys.stderr)
 
     createdSeconds = udJson["created"] / 1000
     dt = datetime.datetime.fromtimestamp(createdSeconds).astimezone()
     createdStr = dt.isoformat()
+
     for dependency in dependencies:
         del dependency["compatibilityInfo"]  # we don't use this in VDI
+
+    patchDatasetType(udJson)
+
     return {
         "name": udJson["meta"]["name"],
         "createdOn": createdStr,
@@ -274,12 +282,19 @@ def createBodyForPost(udJson):
         "origin": origin
     }
 
+
+def patchDatasetType(udJson) -> None:
+    if udJson["type"]["name"].lower() == "isa":
+        udJson["type"]["name"] = "isasimple"
+        udJson["type"]["version"] = "1.0"
+    if udJson["type"]["name"].lower() == "biom":
+        udJson["type"]["version"] = "1.0"
+
+
 def postMetadataAndData(vdiDatasetsUrl, json_blob, tarball_name, vdi_headers):
     try:
         url = vdiDatasetsUrl + "/admin/proxy-upload"
         print("Posting to VDI: " + url, file=sys.stderr)
-        #print("JSON: " + str(json_blob), file=sys.stderr)
-        #print("Head: " + str(vdi_headers), file=sys.stderr)
         form_fields = {"file": open(tarball_name, "rb"), "meta":json.dumps(json_blob)}
         response = requests.post(url, files=form_fields, headers=vdi_headers, verify=SSL_VERIFY)
         response.raise_for_status()
@@ -363,59 +378,3 @@ def handleRequestException(e, url, msg):
     print("HTTP Code: " + str(e.response.status_code) + " " + e.response.text, file=sys.stderr)
     print("URL: " + url, file=sys.stderr)
     exit(1)
-
-
-"""
-https://plasmodb.org/plasmo/service/users/current/user-datasets/4069406
-
-{
-owner: "steve fischer",
-projects: [
-"ClinEpiDB"
-],
-created: 1666986925503,
-isInstalled: false,
-questions: [ ],
-type: {
-data: null,
-display: "ISA Simple",
-name: "ISA",
-version: "0.0"
-},
-sharedWith: [
-{
-userDisplayName: "Cristinaa Aurrecoechea",
-time: 1626446589000,
-user: 376,
-email: "aurreco@uga.edu"
-}
-],
-dependencies: [
-{
-resourceDisplayName: "TbruceiLister427 Genome",
-resourceIdentifier: "TriTrypDB-29_TbruceiLister427_Genome",
-resourceVersion: "29",
-compatibilityInfo: null
-}
-]
-isCompatible: null,
-size: 38926,
-meta: {
-summary: "Lee Gambian with Eigengene Values",
-name: "Lee Gambian - HPI",
-description: ""
-},
-quota: 10,
-ownerUserId: 119782143,
-datafiles: [
-{
-size: 38926,
-name: "metadata_with_eigenvalues.txt"
-}
-],
-percentQuotaUsed: "0.0004",
-id: 4069406,
-age: 22292101811
-}
-"""
-
