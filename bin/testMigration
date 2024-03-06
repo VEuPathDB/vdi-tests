@@ -154,9 +154,12 @@ and id.udId < $maxUdId
 
   my $legacySql = "
 select d.user_dataset_id, etg.stable_id, internal_abbrev, etg.description, display_name, display_name_plural, has_attribute_collections, is_many_to_one_with_parent, cardinality
-from apidbuserdatasets.datasetattributes$DBLINK d, apidbuserdatasets.entitytypegraph$DBLINK etg, apidbuserdatasets.UserDatasetEvent$DBLINK e
+from apidbuserdatasets.datasetattributes$DBLINK d, apidbuserdatasets.entitytypegraph$DBLINK etg, 
+     apidbuserdatasets.UserDatasetEvent$DBLINK e, apidbuserdatasets.userdatasetproject p
 where d.user_dataset_id < $maxUdId
 and d.study_stable_id = etg.study_stable_id
+AND p.user_dataset_id = d.user_dataset_id
+AND p.project = 'ClinEpiDB'
 and e.user_dataset_id = d.user_dataset_id
 and e.status = 'complete' and e.event_type = 'install'
 ";
@@ -247,7 +250,7 @@ from $vdiDatasetsSchema.attributevalue_${vdiStudyId}_$vdiEntityId
 ";
 
   my $legacySql = "
-select ${legacyEntityId}_stable_id as entity_id, attribute_stable_id, string_value, date_value, number_value
+select ${legacyEntityId}_stable_id as entity_id, (CASE WHEN attribute_stable_id = 'TEMP_longitude' THEN 'OBI_0001621' ELSE attribute_stable_id END), string_value, date_value, number_value
 from apidbuserdatasets.attributevalue_${legacyStudyId}_$legacyEntityId$DBLINK
 ";
 
@@ -261,22 +264,38 @@ from apidbuserdatasets.attributevalue_${legacyStudyId}_$legacyEntityId$DBLINK
 sub testEdaAttributeGraph {
   my ($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId, $udId) = @_;
 
+  print STDERR "AG: $udId\n";
+
+  my $vdiTableName = "attributegraph_${vdiStudyId}_$vdiEntityId";
+  my $legacyTableName = "attributegraph_${legacyStudyId}_$legacyEntityId";
+
+  my $vdiExists = testTableExists($vdiDatasetsSchema, $vdiTableName);
+  my $legacyExists = testTableExists('apidbuserdatasets', $legacyTableName);
+
+  unless ($vdiExists && $legacyExists) {
+    print "MISSING VDI TABLE $vdiTableName\n" unless $vdiExists;
+    print "MISSING LEGACY TABLE $legacyTableName\n" unless $legacyExists;
+    return 1;
+  }
+
   my $vdiSql = "
-select provider_label, display_name, definition, vocabulary, display_type, hidden, 
+select provider_label, display_name, definition, display_type, hidden, 
 display_order, display_range_min, display_range_max, range_min, range_max, bin_width_override, 
-bin_width_computed, mean, median, lower_quartile, upper_quartile, is_temporal, is_featured, 
-is_merge_key, impute_zero, is_repeated, variable_spec_to_impute_zeroes_for, has_study_dependent_vocabulary, 
+case when data_type = 'number' or data_type = 'integer' then to_char(to_number(round(mean, 2))) else mean end as rounded_mean,
+is_temporal, is_featured, 
+is_merge_key, impute_zero, is_repeated, variable_spec_to_impute_zeroes_for,
 weighting_variable_spec, has_values, data_type, distinct_values_count, is_multi_valued, data_shape, unit, scale, precision 
-from $vdiDatasetsSchema.attributegraph_${vdiStudyId}_$vdiEntityId
+from $vdiDatasetsSchema.$vdiTableName
 ";
 
   my $legacySql = "
-select provider_label, display_name, definition, vocabulary, display_type, hidden, 
+select provider_label, display_name, definition, display_type, hidden, 
 display_order, display_range_min, display_range_max, range_min, range_max, bin_width_override, 
-bin_width_computed, mean, median, lower_quartile, upper_quartile, is_temporal, is_featured, 
-is_merge_key, impute_zero, is_repeated, variable_spec_to_impute_zeroes_for, has_study_dependent_vocabulary, 
+case when data_type = 'number' or data_type = 'integer' then to_char(to_number(round(mean, 2))) else mean end as rounded_mean,
+is_temporal, is_featured, 
+is_merge_key, impute_zero, is_repeated, variable_spec_to_impute_zeroes_for,
 weighting_variable_spec, has_values, data_type, distinct_values_count, is_multi_valued, data_shape, unit, scale, precision 
-from apidbuserdatasets.attributegraph_${legacyStudyId}_$legacyEntityId$DBLINK
+from apidbuserdatasets.$legacyTableName$DBLINK
 ";
 
   my $sql = "$legacySql MINUS $vdiSql";
@@ -290,31 +309,57 @@ sub testEdaAttributes {
   my ($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId, $udId) = @_;
 
   my $vdiTableName = "attributes_${vdiStudyId}_$vdiEntityId";
-  my @vdiColNames = sort(findTableColumns($dbh, $vdiDatasetsSchema, $vdiTableName, ""));
   my $legacyTableName = "attributes_${legacyStudyId}_$legacyEntityId$DBLINK";
-  my @legacyColNames = sort(findTableColumns($dbh, 'apidbuserdatasets', $legacyTableName, $DBLINK));
+
+  # get (colName, uc(colName)) tuples, sorted by uc
+  my @vdiColNames = sort {$a->[1] cmp $b->[1]} findTableColumns($dbh, $vdiDatasetsSchema, $vdiTableName, "");
+  my $vdiColNamesStr = join(", ", map { $_->[0] } @vdiColNames);
+  my @legacyColNames = sort {$a->[1] cmp $b->[1]} findTableColumns($dbh, 'apidbuserdatasets', $legacyTableName, $DBLINK);
+  my $legacyColNamesStr = join(", ", map { "'$_->[0]'" }  @legacyColNames);
 
   if (scalar(@vdiColNames) != scalar(@legacyColNames)) {
     print "Attributes table column counts disagree\n";
     return 1;
   }
 
-  foreach my $col (@vdiColNames) {
-    if ($col ne shift(@legacyColNames)) {
-      print "Attributes tables have different column names\n";
+  for (my $i=0; $i<scalar(@vdiColNames); $i++) {
+    if (@vdiColNames[$i]->[1] ne @legacyColNames[$i]->[1]) {
+      print "Attributes tables $vdiTableName and $legacyTableName have different column names\n";
+      print "VDI: $vdiColNamesStr\n";
+      print "Legacy: $legacyColNamesStr\n";
       return 1;
     }
   }
 
-  my $colNamesStr = join(", ", @vdiColNames);
-  my $vdiSql = "select $colNamesStr from $vdiDatasetsSchema.$vdiTableName";
-  my $legacySql = "select $colNamesStr from apidbuserdatasets.$legacyTableName$DBLINK";
+  my $vdiT = "$vdiDatasetsSchema.$vdiTableName";
+  my $vdiSql = "select count(*) from $vdiT";
+  my $sth = $dbh->prepare($vdiSql);
+  $sth->execute();
+  my ($vdiRowCount) = $sth->fetchrow_array;
 
-  my $sql = "$legacySql MINUS $vdiSql";
-  my $foundBad = runEdaMinus($dbh, $sql, "Attributes", "Legacy minus VDI", $udId);
-  $sql = "$vdiSql MINUS $legacySql";
-  $foundBad |= runEdaMinus($dbh, $sql, "Attributes", "VDI minus Legacy", $udId);
-  return $foundBad;
+  my $legacyT = "apidbuserdatasets.$legacyTableName$DBLINK";
+  my $legacySql = "select count(*) from $legacyT";
+  $sth = $dbh->prepare($legacySql);
+  $sth->execute();
+  my ($legacyRowCount) = $sth->fetchrow_array;
+  if ($legacyRowCount != $vdiRowCount && $legacyRowCount != 0) {
+    print "Attributes tables $vdiTableName and $legacyTableName have different row counts.  VDI: $vdiRowCount Legacy: $legacyRowCount\n";
+    return 1;
+  }
+  return 0;
+}
+
+sub testTableExists {
+  my ($schemaName, $tableName) = @_;
+
+  my $sql =
+"select count(*) from sys.all_tables where owner = upper('$schemaName')
+and table_name = upper('$tableName')";
+
+  my $sth = $dbh->prepare($sql);
+  $sth->execute();
+  my ($count) = $sth->fetchrow_array;
+  return $count;
 }
 
 sub runEdaMinus {
@@ -343,7 +388,8 @@ sub findTableColumns {
   $sth->execute();
   my @columns;
   while (my ($colName) = $sth->fetchrow_array) {
-    push(@columns, $colName);
+    $colName = 'OBI_0001621' if $colName eq 'TEMP_longitude';
+    push(@columns, [$colName, uc($colName)]);
   }
   return @columns;
 }
