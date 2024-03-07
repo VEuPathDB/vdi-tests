@@ -279,7 +279,7 @@ sub testEdaAttributeGraph {
   }
 
   my $vdiSql = "
-select provider_label, display_name, definition, display_type, hidden, 
+select stable_id, provider_label, display_name, definition, display_type, hidden, 
 display_order, display_range_min, display_range_max, range_min, range_max, bin_width_override, 
 case when data_type = 'number' or data_type = 'integer' then to_char(to_number(round(mean, 2))) else mean end as rounded_mean,
 is_temporal, is_featured, 
@@ -289,7 +289,7 @@ from $vdiDatasetsSchema.$vdiTableName
 ";
 
   my $legacySql = "
-select provider_label, display_name, definition, display_type, hidden, 
+select stable_id, provider_label, display_name, definition, display_type, hidden, 
 display_order, display_range_min, display_range_max, range_min, range_max, bin_width_override, 
 case when data_type = 'number' or data_type = 'integer' then to_char(to_number(round(mean, 2))) else mean end as rounded_mean,
 is_temporal, is_featured, 
