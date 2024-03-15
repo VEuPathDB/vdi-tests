@@ -197,6 +197,8 @@ sub testEdaStudySpecificTables {
     $count++;
     print STDERR "$count studies tested\n" if $count % 10 == 0;
   }
+  print STDERR "$count studies tested\n";
+
   print "Found $bumTablesCount bad tables out of " . ($count * 4) . "\n";
 }
 
@@ -265,59 +267,44 @@ sub testEdaAttributeValue {
 
   return 1 unless testEdaTablePairExists($dbh, "AttributeValue", $vdiDatasetsSchema, $vdiTableName, $legacyTableName);
 
+  my $foundBad = 0;
+  $foundBad |= testEdaAttrVal($dbh,  $vdiDatasetsSchema, $vdiTableName, $legacyTableName, 'string', $vdiEntityId, $legacyEntityId, $udId);
+  $foundBad |= testEdaAttrVal($dbh,  $vdiDatasetsSchema, $vdiTableName, $legacyTableName, 'number', $vdiEntityId, $legacyEntityId, $udId);
+  $foundBad |= testEdaAttrVal($dbh,  $vdiDatasetsSchema, $vdiTableName, $legacyTableName, 'date', $vdiEntityId, $legacyEntityId, $udId);
+  return $foundBad;
+}
+
+sub testEdaAttrVal {
+  my ($dbh, $vdiDatasetsSchema, $vdiTableName, $legacyTableName, $dataType, $vdiEntityId, $legacyEntityId, $udId) = @_;
+
+  my $where = "where ${dataType}_value is not null";
+  $where = "where number_value is null and date_value is null" if $dataType eq 'string';
+
   my $vdiSql = "
 select ${vdiEntityId}_stable_id as entity_id,
-upper(attribute_stable_id),
-string_value, date_value, number_value
-from $vdiDatasetsSchema.attributevalue_${vdiStudyId}_$vdiEntityId
+upper(attribute_stable_id) as attr_stable_id,
+${dataType}_value
+from $vdiDatasetsSchema.$vdiTableName
+$where
 ";
 
   my $legacySql = "
 select ${legacyEntityId}_stable_id as entity_id,
 (CASE WHEN attribute_stable_id = 'TEMP_longitude' THEN 'OBI_0001621'
       ELSE 'VAR_' || substr(RAWtoHEX(STANDARD_HASH(replace(attribute_stable_id, '.', '_'), 'SHA1')), 0, 16)
-      END),
- string_value, date_value, number_value
-from apidbuserdatasets.attributevalue_${legacyStudyId}_$legacyEntityId$DBLINK
+      END) as attr_stable_id,
+${dataType}_value
+from apidbuserdatasets.$legacyTableName
+$where
 ";
 
   my $sql = "$legacySql MINUS $vdiSql";
-  my $foundBad = runEdaMinus($dbh, $sql, "AttributeValue", "Legacy minus VDI($legacyTableName minus $vdiTableName)", $udId);
+  my $foundBad = runEdaMinus($dbh, $sql, "AttributeValue $dataType", "Legacy minus VDI($legacyTableName minus $vdiTableName)", $udId);
   $sql = "$vdiSql MINUS $legacySql";
-  $foundBad |= runEdaMinus($dbh, $sql, "Ancestors", "VDI minus Legacy ($vdiTableName minus $legacyTableName)", $udId);
+  $foundBad |= runEdaMinus($dbh, $sql, "AttributeValue $dataType", "VDI minus Legacy ($vdiTableName minus $legacyTableName)", $udId);
   return $foundBad;
 }
 
-sub testEdaAttributeValue {
-  my ($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId, $udId) = @_;
-
-  my $vdiTableName = "attributevalue_${vdiStudyId}_$vdiEntityId";
-  my $legacyTableName = "attributevalue_${legacyStudyId}_$legacyEntityId$DBLINK";
-
-  return 1 unless testEdaTablePairExists($dbh, "AttributeValue", $vdiDatasetsSchema, $vdiTableName, $legacyTableName);
-
-  my $vdiSql = "
-select ${vdiEntityId}_stable_id as entity_id,
-upper(attribute_stable_id),
-string_value, date_value, number_value
-from $vdiDatasetsSchema.attributevalue_${vdiStudyId}_$vdiEntityId
-";
-
-  my $legacySql = "
-select ${legacyEntityId}_stable_id as entity_id,
-(CASE WHEN attribute_stable_id = 'TEMP_longitude' THEN 'OBI_0001621'
-      ELSE 'VAR_' || substr(RAWtoHEX(STANDARD_HASH(attribute_stable_id, 'SHA1')), 0, 16)
-      END),
- string_value, date_value, number_value
-from apidbuserdatasets.attributevalue_${legacyStudyId}_$legacyEntityId$DBLINK
-";
-
-  my $sql = "$legacySql MINUS $vdiSql";
-  my $foundBad = runEdaMinus($dbh, $sql, "AttributeValue", "Legacy minus VDI ($legacyTableName minus $vdiTableName)", $udId);
-  $sql = "$vdiSql MINUS $legacySql";
-  $foundBad |= runEdaMinus($dbh, $sql, "AttributeValue", "VDI minus Legacy ($vdiTableName minus $legacyTableName)", $udId);
-  return $foundBad;
-}
 
 sub testEdaAttributeGraph {
   my ($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId, $udId) = @_;
