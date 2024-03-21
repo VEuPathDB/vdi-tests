@@ -25,7 +25,6 @@ import re
 
 POLLING_FACTOR = 1.5  # multiplier for progressive polling of status endpoint
 POLLING_INTERVAL_MAX = 60
-POLLING_TIMEOUT = 10 * POLLING_INTERVAL_MAX
 ORIGINATING_USER_HEADER_KEY = "originating-user-id"
 
 SSL_VERIFY = False
@@ -316,9 +315,6 @@ def pollForUploadComplete(vdiDatasetsUrl, vdiId, vdiHeaders):
         time.sleep(poll_interval_seconds)  # sleep for specified seconds
         if poll_interval_seconds < POLLING_INTERVAL_MAX:
             poll_interval_seconds *= POLLING_FACTOR
-        if (time.time() - start_time > POLLING_TIMEOUT):
-            print("Timed out polling for upload completion status", file=sys.stderr)
-            exit(1)
 
 # return True if still in progress; False if success.  Fail and terminate if system or validation error
 def checkUploadInprogress(vdiDatasetsUrl, vdiId, vdiHeaders):
