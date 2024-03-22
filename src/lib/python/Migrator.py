@@ -220,7 +220,7 @@ def downloadFiles(fileNames, userId, udId, downloadDir, udServiceUrl, udHeaders)
         try:
             url = udServiceUrl + "/users/current/user-datasets/admin/" + str(userId) + "/" + str(udId) + "/user-datafiles/" + urllib.parse.quote(fileName)
             request = urllib.request.Request(url, None, udHeaders)
-            response = urllib.request.urlopen(request, timeout=180)
+            response = urllib.request.urlopen(request, timeout=360)
             data = response.read()
             file_ = open(downloadDir + "/" + fileName, 'wb')
             file_.write(data)
