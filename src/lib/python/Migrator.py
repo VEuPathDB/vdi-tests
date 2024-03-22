@@ -192,11 +192,7 @@ def findFilesToMigrate(udId, udType, dataFileInfos):
             return None
         return dataFileNames
     elif udType == BIOM:
-        filtered = list(filter(lambda file: not (re.search('\.tsv$', file) or re.search('\.json$', file)), dataFileNames))
-        if len(filtered) != 1:
-            printBumUd(udId, udType, dataFileNames)
-            return None
-        return filtered
+        return dataFileNames
     elif udType ==  ISA:
         return dataFileNames
     elif udType == BIGWIG:
