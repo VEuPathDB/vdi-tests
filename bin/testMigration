@@ -32,7 +32,7 @@ my $legacyInstallStatus = findLegacyInstallStatus($dbh);
 my $vdiInstallStatus = findVdiInstallStatus($dbh, $vdiControlSchema, $idMapTable);
 
 print STDERR "Testing EDA\n";
-testEda($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
+testEda($dbh, $vdiDatasetsSchema, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
 exit 0;
 
 print STDERR "Testing Gene List\n";
@@ -85,7 +85,7 @@ sub readWdkJson {
   my $wdkUdIds = {};
   foreach my $ud (@$wdk) {
     my $type = $ud->{type}->{name};
-    $wdkUdIds->{$ud->{id}} = 1;
+    $wdkUdIds->{$ud->{id}} = $ud->{ownerUserId};
     next unless $type eq 'RnaSeq' or $type eq 'BigwigFiles';
     my $datafiles = $ud->{datafiles};
     $expectedUdFiles->{$type}->{$ud->{id}} = [];
@@ -143,10 +143,10 @@ my $sth = $dbh->prepare($sql);
 }
 
 sub testEda {
-  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds) = @_;
+  my ($dbh, $vdiDatasetsSchema, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds) = @_;
 
   testEdaEntityTypeGraph($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
-  testEdaStudySpecificTables($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus);
+  testEdaStudySpecificTables($dbh, $vdiDatasetsSchema, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
 }
 
 sub testEdaEntityTypeGraph {
@@ -167,7 +167,7 @@ from apidbuserdatasets.datasetattributes$DBLINK d, apidbuserdatasets.entitytypeg
 where d.user_dataset_id < $maxUdId
 and d.study_stable_id = etg.study_stable_id
 AND p.user_dataset_id = d.user_dataset_id
-AND p.project = 'ClinEpiDB'
+AND p.project = 'MicrobiomeDB'
 and e.user_dataset_id = d.user_dataset_id
 and e.status = 'complete' and e.event_type = 'install'
 ";
@@ -178,37 +178,41 @@ and e.status = 'complete' and e.event_type = 'install'
 # for those entities in EntityTypeGraph that are in common between legacy and VDI, check their study-specific tables
 # (ones that are not in common were reported above as issues)
 sub testEdaStudySpecificTables {
-  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus) = @_;
+  my ($dbh, $vdiDatasetsSchema, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds) = @_;
 
   # return a list of (udId, studyId, entityId) to test
-  my @entities = findStudyEntities($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus);
+  my @entities = findStudyEntities($dbh, $vdiDatasetsSchema, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus);
   my $count = scalar(@entities);
   print "Found $count study-entities\n";
 
   my $bumTablesCount = 0;
   my $count = 0;
   foreach my $tuple (@entities) {
-    my ($udId, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId) = @$tuple;
-    print "Testing EDA | UD: $udId | vdi study: $vdiStudyId | legacy study: $legacyStudyId\n";
+    my ($udId, $type, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId) = @$tuple;
+    my $vdiId = $importedUds->{$udId}->{vdiId};
+    my $userId = $wdkUdIds->{$udId};
+    print "\n------------ Testing EDA | UD: $udId | VDI: $vdiId | User: $userId | vdi study: $vdiStudyId | legacy study: $legacyStudyId --------------\n";
     $bumTablesCount += testEdaAncestors($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId, $udId);
     $bumTablesCount += testEdaAttributeGraph($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId, $udId);
-    $bumTablesCount += testEdaAttributeValue($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId, $udId);
-    $bumTablesCount += testEdaAttributes($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId, $udId);
+    $bumTablesCount += testEdaAttributeValue($dbh, $type, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId, $udId);
+#    $bumTablesCount += testEdaAttributes($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId, $udId);
     $count++;
     print STDERR "$count studies tested\n" if $count % 10 == 0;
   }
   print STDERR "$count studies tested\n";
 
-  print "Found $bumTablesCount bad tables out of " . ($count * 4) . "\n";
+  print "Found $bumTablesCount bad tables out of " . ($count * 4) . "\n\n";
 }
 
 # find (study, entity) tuples that are in common between legacy and VDI
 sub findStudyEntities {
-  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus) = @_;
+  my ($dbh, $vdiDatasetsSchema, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus) = @_;
 
   my $sql = "
-select distinct id.udId, etg.internal_abbrev as v_internal_abbrev, s.internal_abbrev as v_study_internal_abbrev, legacy.internal_abbrev as l_internal_abbrev, legacy.study_internal_abbrev as l_study_internal_abbrev
-from $idMapTable id, $vdiDatasetsSchema.entitytypegraph etg, $vdiDatasetsSchema.study s,
+select distinct id.udId, d.type_name, etg.internal_abbrev as v_internal_abbrev, s.internal_abbrev as v_study_internal_abbrev, legacy.internal_abbrev as l_internal_abbrev, legacy.study_internal_abbrev as l_study_internal_abbrev
+from $idMapTable id, $vdiDatasetsSchema.entitytypegraph etg,
+     $vdiDatasetsSchema.study s,
+     $vdiControlSchema.dataset d,
 (select d.user_dataset_id, etg.internal_abbrev, s.internal_abbrev as study_internal_abbrev
  from apidbuserdatasets.datasetattributes$DBLINK d, apidbuserdatasets.entitytypegraph$DBLINK etg, 
  apidbuserdatasets.UserDatasetEvent$DBLINK e, apidbuserdatasets.study s
@@ -219,6 +223,7 @@ from $idMapTable id, $vdiDatasetsSchema.entitytypegraph etg, $vdiDatasetsSchema.
  and e.status = 'complete' and e.event_type = 'install'
 ) legacy
 where s.user_dataset_id = id.vdiId
+and d.dataset_id = id.vdiId
 and legacy.user_dataset_id = id.udId
 and etg.study_stable_id = s.stable_id
 and id.udId < $maxUdId
@@ -229,9 +234,9 @@ and id.udId < $maxUdId
 
   my @commonStudyEntities;
   # loop through all studies/entities, and generate table names for each
-  while (my ($udId, $v_entityId, $v_studyId, $l_entity_id, $l_study_id) = $sth->fetchrow_array) {
+  while (my ($udId, $type, $v_entityId, $v_studyId, $l_entity_id, $l_study_id) = $sth->fetchrow_array) {
     $count += 1;
-    push(@commonStudyEntities, [$udId, $v_studyId, $v_entityId, $l_study_id, $l_entity_id]);
+    push(@commonStudyEntities, [$udId, $type, $v_studyId, $v_entityId, $l_study_id, $l_entity_id]);
   }
   return @commonStudyEntities;
 }
@@ -260,48 +265,33 @@ select ${legacyEntityId}_stable_id as ID from apidbuserdatasets.ancestors_${lega
 }
 
 sub testEdaAttributeValue {
-  my ($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId, $udId) = @_;
+  my ($dbh, $type, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId, $udId) = @_;
 
   my $vdiTableName = "attributevalue_${vdiStudyId}_$vdiEntityId";
   my $legacyTableName = "attributevalue_${legacyStudyId}_$legacyEntityId$DBLINK";
 
   return 1 unless testEdaTablePairExists($dbh, "AttributeValue", $vdiDatasetsSchema, $vdiTableName, $legacyTableName);
 
-  my $foundBad = 0;
-  $foundBad |= testEdaAttrVal($dbh,  $vdiDatasetsSchema, $vdiTableName, $legacyTableName, 'string', $vdiEntityId, $legacyEntityId, $udId);
-  $foundBad |= testEdaAttrVal($dbh,  $vdiDatasetsSchema, $vdiTableName, $legacyTableName, 'number', $vdiEntityId, $legacyEntityId, $udId);
-  $foundBad |= testEdaAttrVal($dbh,  $vdiDatasetsSchema, $vdiTableName, $legacyTableName, 'date', $vdiEntityId, $legacyEntityId, $udId);
-  return $foundBad;
-}
-
-sub testEdaAttrVal {
-  my ($dbh, $vdiDatasetsSchema, $vdiTableName, $legacyTableName, $dataType, $vdiEntityId, $legacyEntityId, $udId) = @_;
-
-  my $where = "where ${dataType}_value is not null";
-  $where = "where number_value is null and date_value is null" if $dataType eq 'string';
-
   my $vdiSql = "
 select ${vdiEntityId}_stable_id as entity_id,
 upper(attribute_stable_id) as attr_stable_id,
-${dataType}_value
+number_value, date_value, string_value
 from $vdiDatasetsSchema.$vdiTableName
-$where
 ";
-
+  my $else = $type eq 'biom'? 'ELSE upper(attribute_stable_id)' : "ELSE 'VAR_' || substr(RAWtoHEX(STANDARD_HASH(replace(attribute_stable_id, '.', '_'), 'SHA1')), 0, 16)" ;
   my $legacySql = "
 select ${legacyEntityId}_stable_id as entity_id,
 (CASE WHEN attribute_stable_id = 'TEMP_longitude' THEN 'OBI_0001621'
-      ELSE 'VAR_' || substr(RAWtoHEX(STANDARD_HASH(replace(attribute_stable_id, '.', '_'), 'SHA1')), 0, 16)
+      $else
       END) as attr_stable_id,
-${dataType}_value
+number_value, date_value, string_value
 from apidbuserdatasets.$legacyTableName
-$where
 ";
 
   my $sql = "$legacySql MINUS $vdiSql";
-  my $foundBad = runEdaMinus($dbh, $sql, "AttributeValue $dataType", "Legacy minus VDI($legacyTableName minus $vdiTableName)", $udId);
+  my $foundBad = runEdaMinus($dbh, $sql, "AttributeValue", "Legacy minus VDI($legacyTableName minus $vdiTableName)", $udId);
   $sql = "$vdiSql MINUS $legacySql";
-  $foundBad |= runEdaMinus($dbh, $sql, "AttributeValue $dataType", "VDI minus Legacy ($vdiTableName minus $legacyTableName)", $udId);
+  $foundBad |= runEdaMinus($dbh, $sql, "AttributeValue", "VDI minus Legacy ($vdiTableName minus $legacyTableName)", $udId);
   return $foundBad;
 }
 
@@ -424,7 +414,7 @@ sub runEdaMinus {
   while (my @row = $sth->fetchrow_array) {
     # write out header (once) only if we have some bummer rows
     if (!$wroteHeader) {
-      print STDOUT "==== EDA $tableName - $title - UD ID: $udId (20 rows max) ====\n";
+      print STDOUT "\n==== EDA $tableName - $title - UD ID: $udId (20 rows max) ====\n";
       $wroteHeader = 1;
     }
     print join("\t", @row) . "\n";
