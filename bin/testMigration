@@ -8,9 +8,9 @@ use Data::Dumper;
 my @envVars = ('DB_NAME', 'DB_USER', 'DB_PASS');
 for my $envVar (@envVars) { die "Missing env variable '$envVar'\n" unless $ENV{$envVar}; }
 
-my ($tinydbFilePath, $udJsonFilePath, $targetDir, $maxUdId, $vdiSchemaSuffix, $dblinkName) = @ARGV;
+my ($project, $tinydbFilePath, $udJsonFilePath, $targetDir, $maxUdId, $vdiSchemaSuffix, $dblinkName) = @ARGV;
 
-die "Usage: testMigration tinydbFilePath udJsonFilePath targetDir maxUdId vdiSchemaSuffix [dblinkName]\n" unless scalar(@ARGV) > 4;
+die "Usage: project testMigration tinydbFilePath udJsonFilePath targetDir maxUdId vdiSchemaSuffix [dblinkName]\n" unless scalar(@ARGV) > 4;
 
 die "Target dir '$targetDir' does not exist\n" unless -d $targetDir;
 
@@ -31,18 +31,19 @@ my ($wdkUdIds, $expectedUdFiles) = readWdkJson($udJsonFilePath, $importedUds);
 my $legacyInstallStatus = findLegacyInstallStatus($dbh);
 my $vdiInstallStatus = findVdiInstallStatus($dbh, $vdiControlSchema, $idMapTable);
 
-print STDERR "Testing EDA\n";
-testEda($dbh, $vdiDatasetsSchema, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
-exit 0;
+if ($project eq 'MicrobiomeDB' || $project eq 'ClinEpiDB') {
+  print STDERR "Testing EDA\n";
+  testEda($dbh, $vdiDatasetsSchema, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds, $project);
+} else {
+  print STDERR "Testing Gene List\n";
+  testGeneList($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
 
-print STDERR "Testing Gene List\n";
-testGeneList($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
+  print STDERR "Testing RNA Seq\n";
+  testRnaSeq($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds, $targetDir, $expectedUdFiles);
 
-print STDERR "Testing RNA Seq\n";
-testRnaSeq($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds, $targetDir, $expectedUdFiles);
-
-print STDERR "Testing Bigwig\n";
-testBigwig($importedUds, $targetDir, $expectedUdFiles);
+  print STDERR "Testing Bigwig\n";
+  testBigwig($importedUds, $targetDir, $expectedUdFiles);
+}
 
 print STDERR "Testing Shares\n";
 testShares($dbh, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
@@ -55,6 +56,12 @@ sub writeIdMapToDb {
   my $tinyJson = do { local $/; <$fh> };
 
   my $tiny = decode_json($tinyJson)->{'_default'};
+
+  my $sth = $dbh->prepare("select table_name FROM user_TABLES WHERE TABLE_NAME = upper('$idMapTable')");
+  $sth->execute();
+  my ($t) = $sth->fetchrow_array;
+  $dbh->do("create table $idMapTable (udId number, vdiId varchar(100), valid number)") unless $t;
+
   $dbh->do("truncate table $idMapTable");
 
   my $sth = $dbh->prepare(<<EOF);
@@ -74,7 +81,7 @@ EOF
 }
 
 sub readWdkJson {
-  my ($jsonFilePath, $importedUds) = @_;
+  my ($jsonFilePath, $importedUds, $project) = @_;
 
   open my $fh, '<', $jsonFilePath or die "error opening $jsonFilePath: $!";
   my $wdkJson = do { local $/; <$fh> };
@@ -85,8 +92,9 @@ sub readWdkJson {
   my $wdkUdIds = {};
   foreach my $ud (@$wdk) {
     my $type = $ud->{type}->{name};
+    next unless $project eq $ud->{projects}->[0];
     $wdkUdIds->{$ud->{id}} = $ud->{ownerUserId};
-    next unless $type eq 'RnaSeq' or $type eq 'BigwigFiles';
+#    next unless $type eq 'RnaSeq' or $type eq 'BigwigFiles';
     my $datafiles = $ud->{datafiles};
     $expectedUdFiles->{$type}->{$ud->{id}} = [];
     my $files = $expectedUdFiles->{$type}->{$ud->{id}};
@@ -143,14 +151,14 @@ my $sth = $dbh->prepare($sql);
 }
 
 sub testEda {
-  my ($dbh, $vdiDatasetsSchema, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds) = @_;
+  my ($dbh, $vdiDatasetsSchema, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds, $project) = @_;
 
-  testEdaEntityTypeGraph($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
+  testEdaEntityTypeGraph($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds, $project);
   testEdaStudySpecificTables($dbh, $vdiDatasetsSchema, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
 }
 
 sub testEdaEntityTypeGraph {
-  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds) = @_;
+  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds, $project) = @_;
 
   my $vdiSql = "
 select id.udId, description, display_name, display_name_plural, has_attribute_collections, is_many_to_one_with_parent, cardinality
@@ -167,7 +175,7 @@ from apidbuserdatasets.datasetattributes$DBLINK d, apidbuserdatasets.entitytypeg
 where d.user_dataset_id < $maxUdId
 and d.study_stable_id = etg.study_stable_id
 AND p.user_dataset_id = d.user_dataset_id
-AND p.project = 'MicrobiomeDB'
+AND p.project = '$project'
 and e.user_dataset_id = d.user_dataset_id
 and e.status = 'complete' and e.event_type = 'install'
 ";
@@ -290,9 +298,9 @@ number_value, date_value, string_value
 from apidbuserdatasets.$legacyTableName
 ";
 
-  my $sql = "$legacySql MINUS $vdiSql";
+  my $sql = "select * from ($legacySql MINUS $vdiSql) order by entity_id, attr_stable_id, number_value";
   my $foundBad = runEdaMinus($dbh, $sql, "AttributeValue", "Legacy minus VDI($legacyTableName minus $vdiTableName)", $udId);
-  $sql = "$vdiSql MINUS $legacySql";
+  $sql = "select * from ($vdiSql MINUS $legacySql) order by entity_id, attr_stable_id, number_value";
   $foundBad |= runEdaMinus($dbh, $sql, "AttributeValue", "VDI minus Legacy ($vdiTableName minus $legacyTableName)", $udId);
   return $foundBad;
 }
@@ -329,9 +337,9 @@ is_repeated,
 from apidbuserdatasets.$legacyTableName$DBLINK
 ";
 
-  my $sql = "$legacySql MINUS $vdiSql";
+  my $sql = "select * from ($legacySql MINUS $vdiSql) order by display_name";
   my $foundBad = runEdaMinus($dbh, $sql, "AttributeGraph", "Legacy minus VDI ($legacyTableName minus $vdiTableName)", $udId);
-  $sql = "$vdiSql MINUS $legacySql";
+  $sql = "select * from ($vdiSql MINUS $legacySql) order by display_name";
   $foundBad |= runEdaMinus($dbh, $sql, "AttributeGraph", "VDI minus Legacy ($vdiTableName minus $legacyTableName)", $udId);
   return $foundBad;
 }
@@ -527,7 +535,7 @@ sub testShares {
 
   my $vdiSql = "
 select m.udId as user_dataset_id, user_id 
-from $vdiControlSchema.dataset_availability v, $idMapTable m
+from $vdiControlSchema.AvailableUserDatasets v, $idMapTable m
 where v.user_dataset_id = m.vdiId
 ";
 
