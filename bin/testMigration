@@ -238,6 +238,7 @@ and d.dataset_id = id.vdiId
 and legacy.user_dataset_id = id.udId
 and etg.study_stable_id = s.stable_id
 and id.udId < $maxUdId
+order by udId
 ";
   my $count;
   my $sth = $dbh->prepare($sql);
@@ -328,6 +329,7 @@ has_values, data_type, distinct_values_count, is_multi_valued, data_shape, unit,
 from $vdiDatasetsSchema.$vdiTableName
 ";
 
+#$vdiSql = "select display_name from  $vdiDatasetsSchema.$vdiTableName";
   my $displNm = $type eq 'isasimple'? "replace(display_name, '.', '_')" : "display_name";
 
   my $legacySql = "
@@ -339,7 +341,7 @@ is_repeated,
  has_values, data_type, distinct_values_count, is_multi_valued, data_shape, unit, scale, precision 
 from apidbuserdatasets.$legacyTableName$DBLINK
 ";
-
+#$legacySql = "select display_name from apidbuserdatasets.$legacyTableName";
   my $sql = "select * from ($legacySql MINUS $vdiSql) order by display_name";
   my $foundBad = runEdaMinus($dbh, $sql, "AttributeGraph", "Legacy minus VDI ($legacyTableName minus $vdiTableName)", $udId);
   $sql = "select * from ($vdiSql MINUS $legacySql) order by display_name";
@@ -466,7 +468,7 @@ group by id.udId
 ";
 
   my $legacySql = "
-select g.user_dataset_id, count(gene_source_id)
+select g.user_dataset_id, count(distinct gene_source_id)
 from apidbuserdatasets.ud_geneid$DBLINK g, apidbuserdatasets.UserDatasetEvent$DBLINK e
 where g.user_dataset_id < $maxUdId
 and g.user_dataset_id = e.user_dataset_id

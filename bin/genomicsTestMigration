@@ -1,0 +1,22 @@
+#!/usr/bin/perl
+
+use strict;
+
+my @envVars = ('DB_USER', 'DB_PASS');
+for my $envVar (@envVars) { die "Missing env variable '$envVar'\n" unless $ENV{$envVar}; }
+
+my ($tinydbFilePath, $udJsonFilePath, $targetDir, $maxUdId, $vdiSchemaSuffix, $dblinkName) = @ARGV;
+
+die "Usage: project testMigration tinydbFilePath udJsonFilePath targetDir maxUdId vdiSchemaSuffix [dblinkName]\n" unless scalar(@ARGV) > 4;
+
+my @genomics = ('AmoebaDB:ameb-inc', 'CryptoDB:cryp-inc', 'FungiDB:fung-inc', 'GiardiaDB:giar-inc', 'HostDB:host-inc', 'MicrosporidiaDB:micr-inc', 'PiroplasmaDB:piro-inc', 'PlasmoDB:plas-inc', 'ToxoDB:toxo-inc', 'TriTrypDB:tryp-inc', 'TrichDB:tvag-inc', 'VectorBase:vect-inc');
+
+for my $p (@genomics) {
+  my ($project, $db) = split(/:/, $p);
+  my $cmd = "export DB_NAME=$db DB_USER=$ENV{DB_USER} DB_PASS=$ENV{DB_PASS}; ~/sourceCode/vdi-tests/bin/testMigration $project ~/migrationTestGenDev/nice-tinydb-all.json ~/migrationTestGenDev/formatted.listing.json ~/migrationTestGenDev/targetDir/ 7106073 DEV_N bld67_dblink > ~/migrationTestGenDev/$project.out";
+
+  `$cmd`;
+
+  print STDERR "Running cmd: $cmd\n";
+}
+

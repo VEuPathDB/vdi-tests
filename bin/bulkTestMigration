@@ -1,0 +1,13 @@
+#!/usr/bin/perl
+
+use strict;
+use DBI;
+use JSON qw( decode_json );
+use Data::Dumper;
+
+my @envVars = ('DB_NAME', 'DB_USER', 'DB_PASS');
+for my $envVar (@envVars) { die "Missing env variable '$envVar'\n" unless $ENV{$envVar}; }
+
+my ($tinydbFilePath, $udJsonFilePath, $targetDir, $maxUdId, $vdiSchemaSuffix, $dblinkName) = @ARGV;
+
+die "Usage: project testMigration tinydbFilePath udJsonFilePath targetDir maxUdId vdiSchemaSuffix [dblinkName]\n" unless scalar(@ARGV) > 4;
