@@ -27,7 +27,7 @@ my $vdiControlSchema = "VDI_CONTROL_$vdiSchemaSuffix";
 my $idMapTable = "vdiUdIdMap_$vdiSchemaSuffix";
 
 my $importedUds = writeIdMapToDb($tinydbFilePath, $dbh, $idMapTable);
-my ($wdkUdIds, $expectedUdFiles) = readWdkJson($udJsonFilePath, $importedUds);
+my ($wdkUdIds, $expectedUdFiles) = readWdkJson($udJsonFilePath, $importedUds, $project);
 my $legacyInstallStatus = findLegacyInstallStatus($dbh);
 my $vdiInstallStatus = findVdiInstallStatus($dbh, $vdiControlSchema, $idMapTable);
 
@@ -90,9 +90,11 @@ sub readWdkJson {
 
   my $expectedUdFiles = {};
   my $wdkUdIds = {};
+  my $count = 0;
   foreach my $ud (@$wdk) {
     my $type = $ud->{type}->{name};
     next unless $project eq $ud->{projects}->[0];
+    $count++;
     $wdkUdIds->{$ud->{id}} = $ud->{ownerUserId};
 #    next unless $type eq 'RnaSeq' or $type eq 'BigwigFiles';
     my $datafiles = $ud->{datafiles};
@@ -104,6 +106,7 @@ sub readWdkJson {
       push(@$files, $name);
     }
   }
+  print STDERR "Found $count wdk records to test\n";
   return ($wdkUdIds, $expectedUdFiles);
 }
 
