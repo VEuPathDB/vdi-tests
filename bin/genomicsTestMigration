@@ -13,7 +13,7 @@ my @genomics = ('AmoebaDB:ameb-inc', 'CryptoDB:cryp-inc', 'FungiDB:fung-inc', 'G
 
 for my $p (@genomics) {
   my ($project, $db) = split(/:/, $p);
-  my $cmd = "export DB_NAME=$db DB_USER=$ENV{DB_USER} DB_PASS=$ENV{DB_PASS}; ~/sourceCode/vdi-tests/bin/testMigration $project ~/migrationTestGenDev/nice-tinydb-all.json ~/migrationTestGenDev/formatted.listing.json ~/migrationTestGenDev/targetDir/ 7106073 DEV_N bld67_dblink > ~/migrationTestGenDev/$project.out";
+  my $cmd = "export DB_NAME=$db DB_USER=$ENV{DB_USER} DB_PASS=$ENV{DB_PASS}; ~/sourceCode/vdi-tests/bin/testMigration $project ~/migrationTestGenDev/nice-tinydb-all.json ~/migrationTestGenDev/formatted.listing.json ~/migrationTestGenDev/targetDir/ 7106073 DEV_N bld67_dblink > ~/migrationTestGenDev/$project-$vdiSchemaSuffix.out";
 
   `$cmd`;
 
