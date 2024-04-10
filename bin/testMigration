@@ -42,7 +42,7 @@ if ($project eq 'MicrobiomeDB' || $project eq 'ClinEpiDB') {
   testRnaSeq($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds, $targetDir, $expectedUdFiles);
 
   print STDERR "Testing Bigwig\n";
-  testBigwig($importedUds, $targetDir, $expectedUdFiles);
+  testBigwig($importedUds, $targetDir, $expectedUdFiles, $vdiInstallStatus);
 }
 
 print STDERR "Testing Shares\n";
@@ -480,20 +480,21 @@ group by g.user_dataset_id
 }
 
 sub testBigwig {
-  my ($importedUds, $targetDir, $expectedUdFiles) = @_;
+  my ($importedUds, $targetDir, $expectedUdFiles, $vdiInstallStatus) = @_;
 
   print STDOUT "MISSING BIGWIG FILES\n";
-  return testFiles($importedUds, $targetDir, $expectedUdFiles, 'BigwigFiles');
+  return testFiles($importedUds, $targetDir, $expectedUdFiles, 'BigwigFiles', $vdiInstallStatus);
 }
 
 sub testFiles {
-  my ($importedUds, $targetDir, $expectedUdFiles, $type) = @_;
+  my ($importedUds, $targetDir, $expectedUdFiles, $type, $vdiInstallStatus) = @_;
   my $bwFiles = $expectedUdFiles->{$type};
 
   foreach my $udId (sort keys %$importedUds) {
-    my $status = checkUdFiles($importedUds->{$udId}->{vdiId}, $targetDir, $bwFiles);
+    my $vdiId = $importedUds->{$udId}->{vdiId};
+    my $status = checkUdFiles($udId, $vdiId, $targetDir, $bwFiles);
     if ($status->{missingDir}) {
-      print STDOUT "$udId\tmissing-directory\n";
+      print STDOUT "$udId\tmissing-directory\t$importedUds->{$udId}->{msg}\t$vdiInstallStatus->{$udId}->{msg}\n";
       next;
     }
     my $missing = $status->{missingFiles};
@@ -531,7 +532,7 @@ group by p.user_dataset_id
   produceCountComparison($vdiSql, $legacySql, "Rna Seq", $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
 
   print STDOUT "MISSING RNASEQ FILES\n";
-  return testFiles($importedUds, $targetDir, $expectedUdFiles, 'RnaSeq');
+  return testFiles($importedUds, $targetDir, $expectedUdFiles, 'RnaSeq', $vdiInstallStatus);
 
 }
 
@@ -631,19 +632,19 @@ $legacySql
 }
 
 sub checkUdFiles {
-  my ($udId, $targetDir, $expectedUdFiles) = @_;
-
+  my ($udId, $vdiId, $targetDir, $expectedUdFiles) = @_;
   my $expectedFiles = $expectedUdFiles->{$udId};
+
   my $return = {missingDir=>0, missingFiles=>[]};
   unless ($expectedFiles && scalar @$expectedFiles) {
     return $return;
   }
 
-  unless (-d "$targetDir/$udId") {
+  unless (-d "$targetDir/$vdiId") {
     $return->{missingDir} = 1;
     return $return;
   }
-  opendir my $dir, "$targetDir/$udId" or die "Cannot open directory $targetDir/$udId: $!";
+  opendir my $dir, "$targetDir/$vdiId" or die "Cannot open directory $targetDir/$udId: $!";
   my @foundFiles = readdir $dir;
   closedir $dir;
   foreach my $f (@$expectedFiles) {
