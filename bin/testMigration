@@ -33,6 +33,12 @@ my $vdiInstallStatus = findVdiInstallStatus($dbh, $vdiControlSchema, $idMapTable
 
 if ($project eq 'MicrobiomeDB' || $project eq 'ClinEpiDB') {
   print STDERR "Testing EDA\n";
+
+  print STDOUT "MISSING BIOM FILES\n";
+  testFiles($importedUds, $targetDir, $expectedUdFiles, 'BIOM', $vdiInstallStatus);
+  print STDOUT "MISSING ISASIMPLE FILES\n";
+  testFiles($importedUds, $targetDir, $expectedUdFiles, 'ISA', $vdiInstallStatus);
+
   testEda($dbh, $vdiDatasetsSchema, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds, $project);
 } else {
   print STDERR "Testing Gene List\n";
@@ -102,7 +108,7 @@ sub readWdkJson {
     my $files = $expectedUdFiles->{$type}->{$ud->{id}};
     foreach my $datafile (@$datafiles) {
       my $name = $datafile->{name};
-      next unless $name =~ /bw$/;
+      next unless $name =~ /bw$/ || $name eq 'install.json';
       push(@$files, $name);
     }
   }
