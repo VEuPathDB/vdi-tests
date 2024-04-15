@@ -5,6 +5,8 @@ use DBI;
 use JSON qw( decode_json );
 use Data::Dumper;
 
+binmode(STDOUT, ":encoding(UTF-8)");
+
 my @envVars = ('DB_NAME', 'DB_USER', 'DB_PASS');
 for my $envVar (@envVars) { die "Missing env variable '$envVar'\n" unless $ENV{$envVar}; }
 
@@ -163,7 +165,7 @@ sub testEda {
   my ($dbh, $vdiDatasetsSchema, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds, $project) = @_;
 
   testEdaEntityTypeGraph($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds, $project);
-  testEdaStudySpecificTables($dbh, $vdiDatasetsSchema, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
+  testEdaStudySpecificTables($dbh, $project, $vdiDatasetsSchema, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
 }
 
 sub testEdaEntityTypeGraph {
@@ -171,16 +173,18 @@ sub testEdaEntityTypeGraph {
 
   my $vdiSql = "
 select id.udId, description, display_name, display_name_plural, has_attribute_collections, is_many_to_one_with_parent, cardinality
-from $idMapTable id, $vdiDatasetsSchema.entitytypegraph etg, $vdiDatasetsSchema.study s
+from $idMapTable id, $vdiDatasetsSchema.entitytypegraph etg, $vdiDatasetsSchema.study s, $vdiControlSchema.dataset_project p
 where s.user_dataset_id = id.vdiId
 and etg.study_stable_id = s.stable_id
+and p.project_id = '$project'
+and p.dataset_id = id.vdiId
 and id.udId < $maxUdId
 ";
 
   my $legacySql = "
 select d.user_dataset_id,  etg.description, display_name, display_name_plural, has_attribute_collections, is_many_to_one_with_parent, cardinality
 from apidbuserdatasets.datasetattributes$DBLINK d, apidbuserdatasets.entitytypegraph$DBLINK etg, 
-     apidbuserdatasets.UserDatasetEvent$DBLINK e, apidbuserdatasets.userdatasetproject p
+     apidbuserdatasets.UserDatasetEvent$DBLINK e, apidbuserdatasets.userdatasetproject$DBLINK p
 where d.user_dataset_id < $maxUdId
 and d.study_stable_id = etg.study_stable_id
 AND p.user_dataset_id = d.user_dataset_id
@@ -195,12 +199,13 @@ and e.status = 'complete' and e.event_type = 'install'
 # for those entities in EntityTypeGraph that are in common between legacy and VDI, check their study-specific tables
 # (ones that are not in common were reported above as issues)
 sub testEdaStudySpecificTables {
-  my ($dbh, $vdiDatasetsSchema, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds) = @_;
+  my ($dbh, $project, $vdiDatasetsSchema, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds) = @_;
 
   # return a list of (udId, studyId, entityId) to test
-  my @entities = findStudyEntities($dbh, $vdiDatasetsSchema, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus);
+  my @entities = findStudyEntities($dbh, $project, $vdiDatasetsSchema, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus);
   my $count = scalar(@entities);
   print "Found $count study-entities\n";
+  print STDERR "Found $count study-entities\n";
 
   my $bumTablesCount = 0;
   my $count = 0;
@@ -223,16 +228,16 @@ sub testEdaStudySpecificTables {
 
 # find (study, entity) tuples that are in common between legacy and VDI
 sub findStudyEntities {
-  my ($dbh, $vdiDatasetsSchema, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus) = @_;
+  my ($dbh, $project, $vdiDatasetsSchema, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus) = @_;
 
   my $sql = "
 select distinct id.udId, d.type_name, etg.internal_abbrev as v_internal_abbrev, s.internal_abbrev as v_study_internal_abbrev, legacy.internal_abbrev as l_internal_abbrev, legacy.study_internal_abbrev as l_study_internal_abbrev
-from $idMapTable id, $vdiDatasetsSchema.entitytypegraph etg,
+from $idMapTable id, $vdiDatasetsSchema.entitytypegraph etg, $vdiControlSchema.dataset_project p,
      $vdiDatasetsSchema.study s,
      $vdiControlSchema.dataset d,
 (select d.user_dataset_id, etg.internal_abbrev, s.internal_abbrev as study_internal_abbrev
  from apidbuserdatasets.datasetattributes$DBLINK d, apidbuserdatasets.entitytypegraph$DBLINK etg, 
- apidbuserdatasets.UserDatasetEvent$DBLINK e, apidbuserdatasets.study s
+ apidbuserdatasets.UserDatasetEvent$DBLINK e, apidbuserdatasets.study$DBLINK s
  where d.user_dataset_id < $maxUdId
  and d.study_stable_id = etg.study_stable_id
  and d.study_stable_id = s.stable_id
@@ -241,6 +246,8 @@ from $idMapTable id, $vdiDatasetsSchema.entitytypegraph etg,
 ) legacy
 where s.user_dataset_id = id.vdiId
 and d.dataset_id = id.vdiId
+and p.project_id = '$project'
+and p.dataset_id = id.vdiId
 and legacy.user_dataset_id = id.udId
 and etg.study_stable_id = s.stable_id
 and id.udId < $maxUdId
@@ -263,9 +270,11 @@ sub testEdaAncestors {
   my ($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId, $udId) = @_;
 
   my $vdiTableName = "ancestors_${vdiStudyId}_$vdiEntityId";
-  my $legacyTableName = "ancestors_${legacyStudyId}_$legacyEntityId$DBLINK";
+  my $legacyTableName = "ancestors_${legacyStudyId}_$legacyEntityId";
 
   return 1 unless testEdaTablePairExists($dbh, "Ancestors", $vdiDatasetsSchema, $vdiTableName, $legacyTableName);
+
+  $legacyTableName = "$legacyTableName$DBLINK";
 
   my $vdiSql = "
 select ${vdiEntityId}_stable_id as ID from $vdiDatasetsSchema.ancestors_${vdiStudyId}_$vdiEntityId
@@ -286,9 +295,11 @@ sub testEdaAttributeValue {
   my ($dbh, $type, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId, $udId) = @_;
 
   my $vdiTableName = "attributevalue_${vdiStudyId}_$vdiEntityId";
-  my $legacyTableName = "attributevalue_${legacyStudyId}_$legacyEntityId$DBLINK";
+  my $legacyTableName = "attributevalue_${legacyStudyId}_$legacyEntityId";
 
   return 1 unless testEdaTablePairExists($dbh, "AttributeValue", $vdiDatasetsSchema, $vdiTableName, $legacyTableName);
+
+  $legacyTableName .= $DBLINK;
 
   my $attrStblId = $type eq 'biom'? 'attribute_stable_id' : 'upper(attribute_stable_id)';
   my $vdiSql = "
@@ -324,6 +335,7 @@ sub testEdaAttributeGraph {
 
   return 1 unless testEdaTablePairExists($dbh, "AttributeGraph", $vdiDatasetsSchema, $vdiTableName, $legacyTableName);
 
+  $legacyTableName .= $DBLINK;
 
   my $vdiSql = "
 select display_name, definition, display_type, hidden,
@@ -336,7 +348,7 @@ from $vdiDatasetsSchema.$vdiTableName
 ";
 
 #$vdiSql = "select display_name from  $vdiDatasetsSchema.$vdiTableName";
-  my $displNm = $type eq 'isasimple'? "replace(display_name, '.', '_')" : "display_name";
+  my $displNm = $type eq 'isasimple'? "replace(display_name, '.', '_') as display_name" : "display_name";
 
   my $legacySql = "
 select $displNm, definition, display_type, hidden,
@@ -345,7 +357,7 @@ case when data_type = 'number' or data_type = 'integer' then to_char(to_number(r
 case when data_type = 'number' or data_type = 'integer' then to_char(to_number(round(mean, 2))) else mean end as rounded_mean,
 is_repeated,
  has_values, data_type, distinct_values_count, is_multi_valued, data_shape, unit, scale, precision 
-from apidbuserdatasets.$legacyTableName$DBLINK
+from apidbuserdatasets.$legacyTableName
 ";
 #$legacySql = "select display_name from apidbuserdatasets.$legacyTableName";
   my $sql = "select * from ($legacySql MINUS $vdiSql) order by display_name";
@@ -359,9 +371,11 @@ sub testEdaAttributes {
   my ($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId, $udId) = @_;
 
   my $vdiTableName = "attributes_${vdiStudyId}_$vdiEntityId";
-  my $legacyTableName = "attributes_${legacyStudyId}_$legacyEntityId$DBLINK";
+  my $legacyTableName = "attributes_${legacyStudyId}_$legacyEntityId";
 
   return 1 unless testEdaTablePairExists($dbh, "Attributes", $vdiDatasetsSchema, $vdiTableName, $legacyTableName);
+
+  $legacyTableName .= $DBLINK;
 
   # get (colName, uc(colName)) tuples, sorted by uc
   my @vdiColNames = sort {$a->[1] cmp $b->[1]} findTableColumns($dbh, $vdiDatasetsSchema, $vdiTableName, "");
@@ -404,8 +418,8 @@ sub testEdaAttributes {
 sub testEdaTablePairExists {
   my ($dbh, $prefix, $vdiDatasetsSchema, $vdiTableName, $legacyTableName) = @_;
 
-  my $vdiExists = testTableExists($vdiDatasetsSchema, $vdiTableName);
-  my $legacyExists = testTableExists('apidbuserdatasets', $legacyTableName);
+  my $vdiExists = testTableExists($vdiDatasetsSchema, $vdiTableName, "");
+  my $legacyExists = testTableExists('apidbuserdatasets', $legacyTableName, $DBLINK);
 
   unless ($vdiExists && $legacyExists) {
     print "MISSING VDI TABLE $vdiTableName\n" unless $vdiExists;
@@ -416,10 +430,10 @@ sub testEdaTablePairExists {
 }
 
 sub testTableExists {
-  my ($schemaName, $tableName) = @_;
+  my ($schemaName, $tableName, $dblink) = @_;
 
   my $sql =
-"select count(*) from sys.all_objects where owner = upper('$schemaName')
+"select count(*) from sys.all_objects$dblink where owner = upper('$schemaName')
 and object_name = upper('$tableName')";
 
   my $sth = $dbh->prepare($sql);
