@@ -45,17 +45,17 @@ if ($project eq 'MicrobiomeDB') {
   testEda($dbh, $vdiDatasetsSchema, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds, $project);
 } else {
   print STDERR "Testing Gene List\n";
-  testGeneList($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
+  testGeneList($dbh, $project, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
 
   print STDERR "Testing RNA Seq\n";
-  testRnaSeq($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds, $targetDir, $expectedUdFiles);
+  testRnaSeq($dbh, $project, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds, $targetDir, $expectedUdFiles);
 
   print STDERR "Testing Bigwig\n";
   testBigwig($importedUds, $targetDir, $expectedUdFiles, $vdiInstallStatus);
 }
 
 print STDERR "Testing Shares\n";
-testShares($dbh, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
+testShares($dbh, $project, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
 
 # create table XXXXX ( udId number, vdiId varchar(100), valid number);
 sub writeIdMapToDb {
@@ -113,6 +113,9 @@ sub readWdkJson {
       my $name = $datafile->{name};
       next unless $name =~ /bw$/ || $name eq 'install.json';
       push(@$files, $name);
+    }
+    if ($type eq 'ISA' || $type eq 'BIOM') {
+      push(@$files, 'install.json');
     }
   }
   print STDERR "Found $count wdk records to test\n";
@@ -478,24 +481,30 @@ sub findTableColumns {
 
 
 sub testGeneList {
-  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds) = @_;
+  my ($dbh, $project, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds) = @_;
 
   my $vdiSql = "
 select id.udId, count(gene_source_id)
-from $idMapTable id, $vdiDatasetsSchema.ud_geneid g
+from $idMapTable id, $vdiDatasetsSchema.ud_geneid g, $vdiControlSchema.dataset_project p
 where g.user_dataset_id = id.vdiId
 and id.udId < $maxUdId
+and p.project_id = '$project'
+and p.dataset_id = id.vdiId
 group by id.udId
 ";
 
   my $legacySql = "
 select g.user_dataset_id, count(distinct gene_source_id)
-from apidbuserdatasets.ud_geneid$DBLINK g, apidbuserdatasets.UserDatasetEvent$DBLINK e
+from apidbuserdatasets.ud_geneid$DBLINK g, apidbuserdatasets.UserDatasetEvent$DBLINK e,
+  apidbuserdatasets.userdatasetproject$DBLINK p
 where g.user_dataset_id < $maxUdId
 and g.user_dataset_id = e.user_dataset_id
 and e.status = 'complete' and e.event_type = 'install'
+AND p.user_dataset_id = g.user_dataset_id
+AND p.project = '$project'
 group by g.user_dataset_id
 ";
+  print STDERR "$vdiSql\n";
 
   produceCountComparison($vdiSql, $legacySql, "Gene List", $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
 }
@@ -524,26 +533,53 @@ sub testFiles {
   print STDOUT "\n";
 }
 
+sub checkUdFiles {
+  my ($udId, $vdiId, $targetDir, $expectedUdFiles) = @_;
+  my $expectedFiles = $expectedUdFiles->{$udId};
+
+  my $return = {missingDir=>0, missingFiles=>[]};
+  unless ($expectedFiles && scalar @$expectedFiles) {
+    return $return;
+  }
+
+  unless (-d "$targetDir/$vdiId") {
+    $return->{missingDir} = 1;
+    return $return;
+  }
+  opendir my $dir, "$targetDir/$vdiId" or die "Cannot open directory $targetDir/$udId: $!";
+  my @foundFiles = readdir $dir;
+  closedir $dir;
+  foreach my $f (@$expectedFiles) {
+    my $missingFiles = $return->{missingFiles};
+    push(@$missingFiles, $f) unless grep(/^$f$/, @foundFiles);
+  }
+  return $return;
+}
+
 sub testRnaSeq {
-  my ($dbh, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds, $targetDir, $expectedUdFiles) = @_;
+  my ($dbh, $project, $vdiDatasetsSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds, $targetDir, $expectedUdFiles) = @_;
 
   my $vdiSql = "
 select id.udId, count(na_feat_expression_id)
 from $idMapTable id, $vdiDatasetsSchema.ud_profileset p,
-  $vdiDatasetsSchema.ud_protocolappnode n, $vdiDatasetsSchema.ud_nafeatureexpression e
+  $vdiDatasetsSchema.ud_protocolappnode n, $vdiDatasetsSchema.ud_nafeatureexpression e, $vdiControlSchema.dataset_project p
 where p.user_dataset_id = id.vdiId
 and id.udId < $maxUdId
 and n.profile_set_id = p.profile_set_id
 and e.protocol_app_node_id = n.protocol_app_node_id
+and p.project_id = '$project'
+and p.dataset_id = id.vdiId
 group by id.udId
 ";
 
   my $legacySql = "
 select p.user_dataset_id, count(na_feat_expression_id)
 from apidbuserdatasets.ud_profileset$DBLINK p, apidbuserdatasets.UserDatasetEvent$DBLINK e,
-  apidbuserdatasets.ud_protocolappnode$DBLINK n, apidbuserdatasets.ud_nafeatureexpression$DBLINK ex
+  apidbuserdatasets.ud_protocolappnode$DBLINK n, apidbuserdatasets.ud_nafeatureexpression$DBLINK ex, apidbuserdatasets.userdatasetproject$DBLINK pr
 where p.user_dataset_id < $maxUdId
 and p.user_dataset_id = e.user_dataset_id
+AND pr.user_dataset_id = e.user_dataset_id
+AND pr.project = '$project'
 and e.status = 'complete' and e.event_type = 'install'
 and n.profile_set_id = p.profile_set_id
 and ex.protocol_app_node_id = n.protocol_app_node_id
@@ -558,24 +594,29 @@ group by p.user_dataset_id
 }
 
 sub testShares {
-  my ($dbh, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds) = @_;
+  my ($dbh, $project, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds) = @_;
 
   my $vdiSql = "
 select m.udId as user_dataset_id, user_id 
-from $vdiControlSchema.AvailableUserDatasets v, $idMapTable m
+from $vdiControlSchema.AvailableUserDatasets v, $idMapTable m, $vdiControlSchema.dataset_project p
 where v.user_dataset_id = m.vdiId
+and p.project_id = '$project'
+and p.dataset_id = m.vdiId
 ";
 
   my $legacySql = "
 select * from
-(select user_dataset_id, recipient_user_id 
-from ApiDBUserDatasets.UserDatasetSharedWith$DBLINK
-where user_dataset_id < $maxUdId
+(select s.user_dataset_id, recipient_user_id 
+from ApiDBUserDatasets.UserDatasetSharedWith$DBLINK s, apidbuserdatasets.userdatasetproject$DBLINK p
+where s.user_dataset_id < $maxUdId
+AND p.user_dataset_id = s.user_dataset_id
+AND p.project = '$project'
 union
-select user_dataset_id, user_id
-from ApiDBUserDatasets.UserDatasetOwner$DBLINK
-where user_dataset_id < $maxUdId
-
+select s.user_dataset_id, user_id
+from ApiDBUserDatasets.UserDatasetOwner$DBLINK s, apidbuserdatasets.userdatasetproject$DBLINK p
+where s.user_dataset_id < $maxUdId
+AND p.user_dataset_id = s.user_dataset_id
+AND p.project = '$project'
 )
 ";
 
@@ -652,25 +693,3 @@ $legacySql
 
 }
 
-sub checkUdFiles {
-  my ($udId, $vdiId, $targetDir, $expectedUdFiles) = @_;
-  my $expectedFiles = $expectedUdFiles->{$udId};
-
-  my $return = {missingDir=>0, missingFiles=>[]};
-  unless ($expectedFiles && scalar @$expectedFiles) {
-    return $return;
-  }
-
-  unless (-d "$targetDir/$vdiId") {
-    $return->{missingDir} = 1;
-    return $return;
-  }
-  opendir my $dir, "$targetDir/$vdiId" or die "Cannot open directory $targetDir/$udId: $!";
-  my @foundFiles = readdir $dir;
-  closedir $dir;
-  foreach my $f (@$expectedFiles) {
-    my $missingFiles = $return->{missingFiles};
-    push(@$missingFiles, $f) unless grep(/^$f$/, @foundFiles);
-  }
-  return $return;
-}
