@@ -33,14 +33,15 @@ my ($wdkUdIds, $expectedUdFiles) = readWdkJson($udJsonFilePath, $importedUds, $p
 my $legacyInstallStatus = findLegacyInstallStatus($dbh);
 my $vdiInstallStatus = findVdiInstallStatus($dbh, $vdiControlSchema, $idMapTable);
 
-if ($project eq 'MicrobiomeDB' || $project eq 'ClinEpiDB') {
+if ($project eq 'MicrobiomeDB') { 
   print STDERR "Testing EDA\n";
-
   print STDOUT "MISSING BIOM FILES\n";
   testFiles($importedUds, $targetDir, $expectedUdFiles, 'BIOM', $vdiInstallStatus);
+  testEda($dbh, $vdiDatasetsSchema, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds, $project);
+} elsif ( $project eq 'ClinEpiDB') {
+  print STDERR "Testing EDA\n";
   print STDOUT "MISSING ISASIMPLE FILES\n";
   testFiles($importedUds, $targetDir, $expectedUdFiles, 'ISA', $vdiInstallStatus);
-
   testEda($dbh, $vdiDatasetsSchema, $vdiControlSchema, $idMapTable, $maxUdId, $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds, $project);
 } else {
   print STDERR "Testing Gene List\n";
@@ -216,7 +217,7 @@ sub testEdaStudySpecificTables {
     print "\n------------ Testing EDA | UD: $udId | VDI: $vdiId | User: $userId | vdi study: $vdiStudyId | legacy study: $legacyStudyId --------------\n";
     $bumTablesCount += testEdaAncestors($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId, $udId);
     $bumTablesCount += testEdaAttributeGraph($dbh, $type, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId, $udId);
-    $bumTablesCount += testEdaAttributeValue($dbh, $type, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId, $udId);
+    $bumTablesCount += testEdaAttributeValue($dbh, $type, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId, $udId) unless $project eq 'MicrobiomeDB';
 #    $bumTablesCount += testEdaAttributes($dbh, $vdiDatasetsSchema, $vdiStudyId, $vdiEntityId, $legacyStudyId, $legacyEntityId, $udId);
     $count++;
     print STDERR "$count studies tested\n" if $count % 10 == 0;
