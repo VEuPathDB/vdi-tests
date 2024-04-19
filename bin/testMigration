@@ -504,7 +504,7 @@ AND p.user_dataset_id = g.user_dataset_id
 AND p.project = '$project'
 group by g.user_dataset_id
 ";
-  print STDERR "$vdiSql\n";
+#  print STDERR "$vdiSql\n";
 
   produceCountComparison($vdiSql, $legacySql, "Gene List", $importedUds, $vdiInstallStatus, $legacyInstallStatus, $wdkUdIds);
 }
@@ -522,9 +522,10 @@ sub testFiles {
 
   foreach my $udId (sort keys %$importedUds) {
     my $vdiId = $importedUds->{$udId}->{vdiId};
+    my $vdiStatus = $vdiId? $vdiInstallStatus->{$udId}->{status} : 'import-missing';
     my $status = checkUdFiles($udId, $vdiId, $targetDir, $bwFiles);
     if ($status->{missingDir}) {
-      print STDOUT "$udId\tmissing-directory\t$importedUds->{$udId}->{msg}\t$vdiInstallStatus->{$udId}->{msg}\n";
+      print STDOUT "$udId\tmissing-directory\t$importedUds->{$udId}->{msg}\t$vdiStatus\n";
       next;
     }
     my $missing = $status->{missingFiles};
@@ -542,7 +543,7 @@ sub checkUdFiles {
     return $return;
   }
 
-  unless (-d "$targetDir/$vdiId") {
+  unless (-d "$targetDir/$vdiId" && $vdiId) {
     $return->{missingDir} = 1;
     return $return;
   }
