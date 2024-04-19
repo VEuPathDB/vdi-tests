@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 
 import sys
+
 sys.path.insert(0, "/opt/veupathdb/lib/python")
 sys.path.insert(0, "../src/lib/python")
 from Migrator import Migrator
+
 
 def usage():
     msg = """
@@ -19,6 +21,7 @@ If projects is empty, then do all projects
     print(msg, file=sys.stderr)
     sys.exit(2)
 
+
 def main():
     if len(sys.argv) < 9:
         usage()
@@ -26,6 +29,7 @@ def main():
     myArgs = sys.argv
     myArgs.pop(0)
     migrator.migrate(*myArgs)
+
 
 if __name__ == "__main__":
     sys.exit(main())
