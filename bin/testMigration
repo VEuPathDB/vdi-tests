@@ -521,11 +521,14 @@ sub testFiles {
   my $bwFiles = $expectedUdFiles->{$type};
 
   foreach my $udId (sort keys %$importedUds) {
-    my $vdiId = $importedUds->{$udId}->{vdiId};
+    my $vdiId;
+    $vdiId = $importedUds->{$udId}->{vdiId} if $importedUds->{$udId};
+    my $msg;
+    $msg = $importedUds->{$udId}->{msg} if $importedUds->{$udId};
     my $vdiStatus = $vdiId? $vdiInstallStatus->{$udId}->{status} : 'import-missing';
     my $status = checkUdFiles($udId, $vdiId, $targetDir, $bwFiles);
     if ($status->{missingDir}) {
-      print STDOUT "$udId\tmissing-directory\t$importedUds->{$udId}->{msg}\t$vdiStatus\n";
+      print STDOUT "$udId\tmissing-directory\t$msg\t$vdiStatus\n";
       next;
     }
     my $missing = $status->{missingFiles};
@@ -663,7 +666,9 @@ $vdiSql
       $vdiInstallTag = "install-absent" unless $importTag;
     }
     $invalidCount += $importedUds->{$udId};
-    print STDOUT $importedUds->{$udId}->{vdiId} . "\t" . join("\t", @row) . "\t$importTag\t$vdiInstallTag\t$reportedMsg\n";
+    my $vdiId;
+    $vdiId = $importedUds->{$udId}->{vdiId} if $importedUds->{$udId};
+    print STDOUT $vdiId . "\t" . join("\t", @row) . "\t$importTag\t$vdiInstallTag\t$reportedMsg\n";
   }
   print "$udType - legacy minus VDI count: $count\n";
   print STDOUT "\n";
