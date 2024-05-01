@@ -485,23 +485,18 @@ sub testGeneList {
 
   my $vdiSql = "
 select id.udId, count(gene_source_id)
-from $idMapTable id, $vdiDatasetsSchema.ud_geneid g, $vdiControlSchema.dataset_project p
+from $idMapTable id, $vdiDatasetsSchema.ud_geneid g
 where g.user_dataset_id = id.vdiId
 and id.udId < $maxUdId
-and p.project_id = '$project'
-and p.dataset_id = id.vdiId
 group by id.udId
 ";
 
   my $legacySql = "
 select g.user_dataset_id, count(distinct gene_source_id)
-from apidbuserdatasets.ud_geneid$DBLINK g, apidbuserdatasets.UserDatasetEvent$DBLINK e,
-  apidbuserdatasets.userdatasetproject$DBLINK p
+from apidbuserdatasets.ud_geneid$DBLINK g, apidbuserdatasets.UserDatasetEvent$DBLINK e
 where g.user_dataset_id < $maxUdId
 and g.user_dataset_id = e.user_dataset_id
 and e.status = 'complete' and e.event_type = 'install'
-AND p.user_dataset_id = g.user_dataset_id
-AND p.project = '$project'
 group by g.user_dataset_id
 ";
 #  print STDERR "$vdiSql\n";
@@ -566,24 +561,20 @@ sub testRnaSeq {
   my $vdiSql = "
 select id.udId, count(na_feat_expression_id)
 from $idMapTable id, $vdiDatasetsSchema.ud_profileset p,
-  $vdiDatasetsSchema.ud_protocolappnode n, $vdiDatasetsSchema.ud_nafeatureexpression e, $vdiControlSchema.dataset_project p
+  $vdiDatasetsSchema.ud_protocolappnode n, $vdiDatasetsSchema.ud_nafeatureexpression e
 where p.user_dataset_id = id.vdiId
 and id.udId < $maxUdId
 and n.profile_set_id = p.profile_set_id
 and e.protocol_app_node_id = n.protocol_app_node_id
-and p.project_id = '$project'
-and p.dataset_id = id.vdiId
 group by id.udId
 ";
 
   my $legacySql = "
 select p.user_dataset_id, count(na_feat_expression_id)
 from apidbuserdatasets.ud_profileset$DBLINK p, apidbuserdatasets.UserDatasetEvent$DBLINK e,
-  apidbuserdatasets.ud_protocolappnode$DBLINK n, apidbuserdatasets.ud_nafeatureexpression$DBLINK ex, apidbuserdatasets.userdatasetproject$DBLINK pr
+  apidbuserdatasets.ud_protocolappnode$DBLINK n, apidbuserdatasets.ud_nafeatureexpression$DBLINK ex
 where p.user_dataset_id < $maxUdId
 and p.user_dataset_id = e.user_dataset_id
-AND pr.user_dataset_id = e.user_dataset_id
-AND pr.project = '$project'
 and e.status = 'complete' and e.event_type = 'install'
 and n.profile_set_id = p.profile_set_id
 and ex.protocol_app_node_id = n.protocol_app_node_id
