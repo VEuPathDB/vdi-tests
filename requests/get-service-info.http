@@ -1,0 +1,15 @@
+### Service Health
+
+GET {{serverURL}}/health
+
+
+
+### Plugin Listing
+
+GET {{serverURL}}/plugins
+
+
+
+### Service Configuration
+
+GET {{serverURL}}/meta-info

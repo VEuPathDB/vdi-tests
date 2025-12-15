@@ -1,0 +1,6 @@
+### Delete a target dataset
+@datasetId = 8cg5Ac80gI10E
+
+DELETE {{serverURL}}/datasets/{{datasetId}}
+Authorization: bearer {{bearerToken}}
+

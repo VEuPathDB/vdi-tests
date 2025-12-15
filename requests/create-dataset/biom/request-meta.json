@@ -1,0 +1,13 @@
+{
+  "type": {
+    "name": "biom",
+    "version": "1.0"
+  },
+  "name": "test001",
+  "summary": "must not be null",
+  "installTargets": [ "MicrobiomeDB" ],
+  "dependencies": [],
+  "origin": "direct-upload",
+  "visibility": "private",
+  "studyCharacteristics": {}
+}

@@ -1,0 +1,4 @@
+### List datasets visible to your user by ownership or share
+GET {{serverURL}}/datasets
+Authorization: bearer {{bearerToken}}
+

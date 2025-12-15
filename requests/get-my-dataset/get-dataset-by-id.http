@@ -1,0 +1,6 @@
+### Get a target dataset
+@datasetId = Nog5xM5tRl1UB
+
+GET {{serverURL}}/datasets/{{datasetId}}
+Authorization: bearer {{bearerToken}}
+

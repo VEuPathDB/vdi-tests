@@ -1,0 +1,34 @@
+### Raw BIOM file.
+POST localhost:8080/datasets
+Content-Type: multipart/form-data; boundary=RequestBoundary
+Authorization: bearer {{bearerToken}}
+
+--RequestBoundary
+Content-Disposition: form-data; name="details"
+Content-Type: application/json
+
+< request-meta.json
+--RequestBoundary
+Content-Disposition: form-data; name="dataFiles"; filename="upload.biom"
+Content-Type: application/octet-stream
+
+< test-001-body.biom
+--RequestBoundary--
+
+
+### Zipped BIOM file.
+POST localhost:8080/datasets
+Content-Type: multipart/form-data; boundary=RequestBoundary
+Authorization: bearer {{bearerToken}}
+
+--RequestBoundary
+Content-Disposition: form-data; name="details"
+Content-Type: application/json
+
+< request-meta.json
+--RequestBoundary
+Content-Disposition: form-data; name="dataFiles"; filename="upload.biom"
+Content-Type: application/octet-stream
+
+< test-001-body.biom
+--RequestBoundary--
