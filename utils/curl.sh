@@ -16,7 +16,7 @@ EOF
 }
 
 buildMapLines() {
-  local output=""
+  local output=''
   while read line; do
     output+="$(printf '%s \\\n' "${line}")"
   done < <(parseMap "$1" "$2" "$3")
@@ -56,8 +56,8 @@ mkdir $resultDir
 
 cat > ${resultDir}/curl-command.sh <<EOF
 curl -isX${httpMethod} \\
-  ${httpHeaders}
-  ${formInputs}
+  ${httpHeaders:-\\}
+  ${formInputs:-\\}
   "${vdiHost}${endpointPath}${VDI_QUERY_PARAMS}"
 EOF
 chmod +x ${resultDir}/curl-command.sh
