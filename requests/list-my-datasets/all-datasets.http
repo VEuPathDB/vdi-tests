@@ -1,4 +1,22 @@
-### List datasets visible to your user by ownership or share
+### List Datasets - Standard
 GET {{serverURL}}/datasets
+Authorization: bearer {{bearerToken}}
+
+
+
+### List Datasets - Shared Only
+GET {{serverURL}}/datasets?ownership=shared
+Authorization: bearer {{bearerToken}}
+
+
+
+### List Datasets - Owned Only
+GET {{serverURL}}/datasets?ownership=owned
+Authorization: bearer {{bearerToken}}
+
+
+
+### List Datasets - Specific Project
+GET {{serverURL}}/datasets?install_target=PlasmoDB
 Authorization: bearer {{bearerToken}}
 

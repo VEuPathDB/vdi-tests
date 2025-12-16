@@ -12,7 +12,7 @@ Content-Type: application/json
 Content-Disposition: form-data; name="dataFiles"; filename="upload.biom"
 Content-Type: application/octet-stream
 
-< test-001-body.biom
+< data.biom
 --RequestBoundary--
 
 
@@ -30,5 +30,5 @@ Content-Type: application/json
 Content-Disposition: form-data; name="dataFiles"; filename="upload.biom"
 Content-Type: application/octet-stream
 
-< test-001-body.biom
+< data.biom
 --RequestBoundary--
