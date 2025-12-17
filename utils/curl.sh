@@ -18,24 +18,42 @@ EOF
 buildMapLines() {
   local output=''
   while read line; do
-    output+="$(printf '%s \\\n' "${line}")"
+    output+="$(printf ' \\\n  %s' "${line}")"
   done < <(parseMap "$1" "$2" "$3")
-  echo $output
+  echo "$output"
+}
+
+buildMultilineCommand() {
+  local output="curl -isX${1}"
+
+  # Headers
+  if [ -n "${2}" ]; then
+    output+="$(buildMapLines "-H" ": " "${2}")"
+  fi
+
+  # Form Fields
+  if [ -n "${3}" ]; then
+    output+="$(buildMapLines "-F" "=" "${3}")"
+  fi
+
+  output+="$(printf ' \\\n  %s' "${4}")"
+
+  echo "$output"
 }
 
 while getopts ':H:M:h:f:dp:q:' option; do
   case $option in
     H)
-      vdiHost="$OPTARG"
+      vdiHost="${OPTARG}"
       ;;
     M)
-      httpMethod="$OPTARG"
+      httpMethod="${OPTARG}"
       ;;
     h)
-      httpHeaders=$(buildMapLines "-H" ": " "$OPTARG")
+      httpHeaders="${OPTARG}"
       ;;
     f)
-      formInputs=$(buildMapLines "-F" "=" "$OPTARG")
+      formInputs="${OPTARG}"
       ;;
     d)
       dryRun=1
@@ -53,17 +71,18 @@ declare -r timestamp=$(date +%s%3N)
 declare -r resultDir=curl-$timestamp
 
 mkdir $resultDir
+echo $resultDir
 
-cat > ${resultDir}/curl-command.sh <<EOF
-curl -isX${httpMethod} \\
-  ${httpHeaders:-\\}
-  ${formInputs:-\\}
-  "${vdiHost}${endpointPath}${VDI_QUERY_PARAMS}"
-EOF
+buildMultilineCommand \
+  "${httpMethod}" \
+  "${httpHeaders}" \
+  "${formInputs}" \
+  "${vdiHost}${endpointPath}${queryString}" \
+  > ${resultDir}/curl-command.sh
+
 chmod +x ${resultDir}/curl-command.sh
 
 if [ $dryRun -eq 1 ]; then
-  echo $resultDir
   exit 0
 else
   ${resultDir}/curl-command.sh > ${resultDir}/full-response.txt || exit 1
@@ -74,5 +93,3 @@ cd ${resultDir}
 head -n1 full-response.txt | sed 's/.\+ \([0-9]\+\) .\+/\1/' | tr -d '\n' > status.txt
 sed -n '/^\r/q;p' full-response.txt | sed '1d' > headers.txt
 sed '1,/^\r/d' full-response.txt > body.txt
-
-echo $resultDir

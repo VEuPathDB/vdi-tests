@@ -1,0 +1,13 @@
+{
+  "type": {
+    "name": "genelist",
+    "version": "1.0"
+  },
+  "name": "test001",
+  "summary": "must not be null",
+  "installTargets": [ "PlasmoDB" ],
+  "dependencies": [],
+  "origin": "direct-upload",
+  "visibility": "private",
+  "studyCharacteristics": {}
+}

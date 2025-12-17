@@ -11,3 +11,11 @@ default:
 .PHONY: list-my-datasets
 list-my-datasets:
 	@$(CURL_UTIL) -p "/datasets" -h '$(HEADERS)'
+
+.PHONY: list-shared-datasets
+list-shared-datasets:
+	@$(CURL_UTIL) -p "/datasets" -h '$(HEADERS)' -q '?ownership=shared'
+
+.PHONY: list-shared-datasets
+list-shared-datasets:
+	@$(CURL_UTIL) -p "/datasets" -h '$(HEADERS)' -q '?ownership=shared'
