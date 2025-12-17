@@ -53,10 +53,10 @@ print-my-datasets:  __env_test
 	fi
 
 # Gets a list of visible user datasets.
-.PHONY: get-my-datasets
-get-my-datasets: TEST_DIR := requests/list-my-datasets
-get-my-datasets: TEST_COMMAND := list-my-datasets
-get-my-datasets:  __test_request
+.PHONY: list-my-datasets
+list-my-datasets: TEST_DIR := requests/list-my-datasets
+list-my-datasets: TEST_COMMAND := list-my-datasets
+list-my-datasets:  __test_request
 
 
 .PHONY: __create_dataset_request

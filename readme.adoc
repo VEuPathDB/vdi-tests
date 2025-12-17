@@ -62,8 +62,12 @@ Options available for all make targets:
   Set to `1` to disable command execution.  The `curl-command.sh` file will be
   generated, but will not be run automatically.
 +
-[source, bash]
-make DRY_RUN=1 some-target
+[source, console]
+----
+make some-target DRY_RUN=1
+generating curl command
+Output saved in test-outputs/test-1765999359390
+----
 ====
 --
 
@@ -125,19 +129,22 @@ provided, the test script will prompt for the target dataset's ID.
 .Example 1: Interactive
 [%collapsible]
 ====
-[source, shell-session]
+[source, console]
 ----
 $ make delete-dataset
 Dataset ID: <input dataset id>
+running delete request
+Output saved in test-outputs/test-1765999293008
 ----
 ====
 
 .Example 2: With CLI Option
 [%collapsible]
 ====
-[source, shell-session]
+[source, console]
 ----
-$ make delete-dataset
-Dataset ID: <input dataset id>
+$ make DATSET_ID=123213 delete-dataset
+running delete request
+Output saved in test-outputs/test-1765999293008
 ----
 ====
