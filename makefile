@@ -4,6 +4,8 @@ TEST_OUTPUT_DIR := test-outputs
 
 HEADERS := {"Authorization":"Bearer ${VDI_AUTH_TOKEN}"}
 
+MAKE_REQUEST_COMMAND = $(MAKE) -C $(TEST_DIR) $(TEST_COMMAND) ROOT_DIR=${PWD} HEADERS='$(HEADERS)' DRY_RUN=$(DRY_RUN) 3>&2 2>/dev/null
+
 .PHONY: default
 default:
 	@awk '{ \
@@ -42,14 +44,16 @@ delete-dataset: __test_request
 
 # Prints visible user datasets to the console.
 .PHONY: print-my-datasets
+print-my-datasets: TEST_DIR := requests/list-my-datasets
+print-my-datasets: TEST_COMMAND := list-my-datasets
 print-my-datasets:  __env_test
-	@RESULT_DIR="$$($(MAKE) -C requests/list-my-datasets list-my-datasets ROOT_DIR=${PWD} HEADERS='$(HEADERS)' 3>&2 2>/dev/null)"
-	if [ -n "$$RESULT_DIR" ]; then
-		jq . requests/list-my-datasets/$$RESULT_DIR/body.txt
-		rm -rf requests/list-my-datasets/$$RESULT_DIR
-	else
-		echo "NO RESULT"
-		exit 1
+	@RESULT_DIR="$$($(MAKE_REQUEST_COMMAND))"; \
+	if [ -n "$$RESULT_DIR" ]; then \
+		jq . requests/list-my-datasets/$$RESULT_DIR/body.txt; \
+		rm -rf requests/list-my-datasets/$$RESULT_DIR; \
+	else \
+		echo "NO RESULT"; \
+		exit 1; \
 	fi
 
 # Gets a list of visible user datasets.
@@ -61,12 +65,21 @@ list-my-datasets:  __test_request
 
 .PHONY: __create_dataset_request
 __create_dataset_request: TEST_DIR := requests/create-dataset
-__create_dataset_request: __test_request
-
+__create_dataset_request:
+	@RESULT_DIR="$$($(MAKE_REQUEST_COMMAND))"; \
+	if [ "$$?" -ne 0 ]; then \
+		echo "REQUEST FAILED!!!"; \
+	elif [ "$$(cat $(TEST_DIR)/$$RESULT_DIR/status.txt)" = "202" ]; then \
+		mv $(TEST_DIR)/$$RESULT_DIR $(TEST_OUTPUT_DIR); \
+		jq -r .datasetId $(TEST_OUTPUT_DIR)/$${RESULT_DIR}/body.txt; \
+	else \
+		mv $(TEST_DIR)/$$RESULT_DIR $(TEST_OUTPUT_DIR); \
+		echo "Output saved in $(TEST_OUTPUT_DIR)/$${RESULT_DIR}"; \
+	fi
 
 .PHONY: __test_request
 __test_request: __env_test
-	@RESULT_DIR="$$($(MAKE) -C $(TEST_DIR) $(TEST_COMMAND) ROOT_DIR=${PWD} HEADERS='$(HEADERS)' DRY_RUN=$(DRY_RUN) 3>&2 2>/dev/null)"; \
+	@RESULT_DIR="$$($(MAKE_REQUEST_COMMAND))"; \
 		if [ "$$?" -ne 0 ]; then echo "REQUEST FAILED!!!"; fi; \
 		if [ -n "$$RESULT_DIR" ]; then mv $(TEST_DIR)/$$RESULT_DIR $(TEST_OUTPUT_DIR); echo "Output saved in $(TEST_OUTPUT_DIR)/$${RESULT_DIR}"; fi
 

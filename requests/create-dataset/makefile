@@ -45,5 +45,5 @@ create-genelist-plasmo: __run-create
 
 .PHONY: __run-create
 __run-create:
-	@[ $(DRY_RUN) -eq 0 ] && echo "running create request" >&3 || echo "generating curl command" >&3
+	@[ $(DRY_RUN) -eq 0 ] && echo "running create request" >&2 || echo "generating curl command" >&2
 	@$(CURL_UTIL) -M POST -p "/datasets" -h '$(HEADERS)' -f '$(FORM_FIELDS)' $(__EXTRA_FLAGS) 2>&3
