@@ -23,5 +23,4 @@ delete-dataset:
 	else \
 		DATASET_ID="$(DATASET_ID)"; \
 	fi; \
-	[ $(DRY_RUN) -eq 0 ] && echo "running delete request" >&3 || echo "generating curl command" >&3 ; \
 	$(CURL_UTIL) -M DELETE -p "/datasets/$${DATASET_ID}" -h '$(HEADERS)' $(__EXTRA_FLAGS) 2>&3

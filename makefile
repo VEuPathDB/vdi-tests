@@ -69,6 +69,9 @@ __create_dataset_request:
 	@RESULT_DIR="$$($(MAKE_REQUEST_COMMAND))"; \
 	if [ "$$?" -ne 0 ]; then \
 		echo "REQUEST FAILED!!!"; \
+	elif [ $(DRY_RUN) -ne 0 ]; then \
+		mv $(TEST_DIR)/$$RESULT_DIR $(TEST_OUTPUT_DIR); \
+		echo "Output saved in $(TEST_OUTPUT_DIR)/$${RESULT_DIR}/curl-command.sh"; \
 	elif [ "$$(cat $(TEST_DIR)/$$RESULT_DIR/status.txt)" = "202" ]; then \
 		mv $(TEST_DIR)/$$RESULT_DIR $(TEST_OUTPUT_DIR); \
 		jq -r .datasetId $(TEST_OUTPUT_DIR)/$${RESULT_DIR}/body.txt; \
