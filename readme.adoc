@@ -119,7 +119,7 @@ provided, the test script will prompt for the target dataset's ID.
 ====
 --
 
-.Example 1: User Input
+.Example 1: Interactive
 [%collapsible]
 ====
 [source, shell]
@@ -129,9 +129,12 @@ Dataset ID: <input dataset id>
 ----
 ====
 
-.Example 2: With Option
+.Example 2: With CLI Option
+[%collapsible]
+====
 [source, shell]
 ----
 $ make delete-dataset
 Dataset ID: <input dataset id>
 ----
+====
