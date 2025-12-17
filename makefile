@@ -15,7 +15,7 @@ create-dataset-biom-raw: __create_dataset_request
 		if [ -n "$$RESULT_DIR" ]; then mv requests/create-dataset/$$RESULT_DIR .; fi
 
 .PHONY: create-dataset-genelist-plasmo-raw
-create-dataset-genelist-plasmo-raw: CREATE_COMMAND := create-genelist-plasmo-raw
+create-dataset-genelist-plasmo-raw: CREATE_COMMAND := create-genelist-plasmo
 create-dataset-genelist-plasmo-raw: __create_dataset_request
 
 .PHONY: print-my-datasets

@@ -34,9 +34,9 @@ create-biom-raw: __run-create
 
 GENELIST_DIR := $(CUR_DIR)/genelist
 
-.PHONY: create-genelist-plasmo-raw
-create-genelist-plasmo-raw: FORM_FIELDS := $(shell $(FORM_UTIL) -e "$(GENELIST_DIR)/plasmo-01/meta.json" -d "$(GENELIST_DIR)/plasmo-01/data.txt")
-create-genelist-plasmo-raw: __run-create
+.PHONY: create-genelist-plasmo
+create-genelist-plasmo: FORM_FIELDS := $(shell $(FORM_UTIL) -e "$(GENELIST_DIR)/plasmo-01/meta.json" -d "$(GENELIST_DIR)/plasmo-01/data.zip")
+create-genelist-plasmo: __run-create
 
 
 # ╔══════════════════════════════════════════════════════════════════════════╗ #
