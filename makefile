@@ -10,13 +10,16 @@ HEADERS := {"Authorization":"Bearer ${VDI_AUTH_TOKEN}"}
 .PHONY: create-dataset-biom-raw
 create-dataset-biom-raw: CREATE_COMMAND := create-biom-raw
 create-dataset-biom-raw: __create_dataset_request
-	@RESULT_DIR="$$($(MAKE) -C requests/create-dataset  ROOT_DIR=${PWD} HEADERS='$(HEADERS)' DRY_RUN=$(DRY_RUN))"; \
-		if [ "$$?" -ne 0 ]; then echo "REQUEST FAILED!!!"; fi; \
-		if [ -n "$$RESULT_DIR" ]; then mv requests/create-dataset/$$RESULT_DIR .; fi
 
 .PHONY: create-dataset-genelist-plasmo-raw
 create-dataset-genelist-plasmo-raw: CREATE_COMMAND := create-genelist-plasmo
 create-dataset-genelist-plasmo-raw: __create_dataset_request
+
+.PHONY: delete-dataset
+delete-dataset:
+	@RESULT_DIR="$$($(MAKE) -C requests/delete-dataset delete-dataset ROOT_DIR=${PWD} HEADERS='$(HEADERS)' DRY_RUN=$(DRY_RUN) 3>&2 2>/dev/null)"; \
+		if [ "$$?" -ne 0 ]; then echo "REQUEST FAILED!!!"; fi; \
+		if [ -n "$$RESULT_DIR" ]; then mv requests/delete-dataset/$$RESULT_DIR .; echo "Output saved in $${RESULT_DIR}/"; fi
 
 .PHONY: print-my-datasets
 print-my-datasets:  __env_test
