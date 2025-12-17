@@ -93,7 +93,7 @@ make create-dataset-genelist-plasmo
 
 Gets a list of datasets visible to your user by way of ownership or sharing.
 
-[source, shell]
+[source, bash]
 make list-my-datasets
 
 
@@ -125,7 +125,7 @@ provided, the test script will prompt for the target dataset's ID.
 .Example 1: Interactive
 [%collapsible]
 ====
-[source, shell]
+[source, shell-session]
 ----
 $ make delete-dataset
 Dataset ID: <input dataset id>
@@ -135,7 +135,7 @@ Dataset ID: <input dataset id>
 .Example 2: With CLI Option
 [%collapsible]
 ====
-[source, shell]
+[source, shell-session]
 ----
 $ make delete-dataset
 Dataset ID: <input dataset id>
