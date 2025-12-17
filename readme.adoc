@@ -1,31 +1,137 @@
 = VDI API Tests
 :source-highlighter: highlightjs
-:toc:
 
-== Overview
-* Tests use the RestAssured DSL to send and validate rest requests to the VDI service.
-* JUnit is used as the testing framework to manage test execution.
+A collection of test scripts to be run through Make against a locally running
+VDI instance.
 
-== Adding a test
-In order to add a test, you can add an entry to the `tests.yaml` file in the `resources/testdata` directory:
+For a full list of available commands on the CLI, run `make` with no target.
 
+== Prerequisites
+
+* A running local VDI stack
+* VEuPathDB OAuth bearer token
+* `make`
+* `curl`
+* `jq`
+
+
+== Setup
+
+Set or export the environment variable `VDI_AUTH_TOKEN` to your OAuth bearer
+token value.
+
+[source, bash]
+----
+export VDI_AUTH_TOKEN=a304ajalskdfja3a0jsdlfak3q30-a0aseajflawskdjflaweblahblahblah
+----
+
+== Outputs
+
+Test outputs and generated curl commands will be placed in subdirectories under
+the link:test-outputs/[] directory.  Each test run directory will be named using
+the timestamp of the test execution.
+
+The contents of each test directory on successful command completion will be:
+
+* `curl-command.sh` - The curl command that was executed to run the test.
+* `full-response.txt` - The entire curl stdout from executing the command.
+* `status.txt` - The numeric HTTP response code.
+* `headers.txt` - The response headers from the HTTP server.
+* `body.txt` - The body portion of the HTTP response.
+
+.Example Result
 [source]
 ----
-- path: isasimple/diy-example.csv
-  project: PlasmoDB
-  expectation: failed_install
-  type: isasimple
+test-outputs/
+ |- test-1765994074430/
+     |- body.txt
+     |- curl-command.sh
+     |- full-response.txt
+     |- headers.txt
+     |- status.txt
 ----
 
-The path should specify a file path relative to the testdata directory.
+== Available Tests
 
-== Running the Tests
-The following environment variables must be set to run the integration tests:
+.Global Options
+--
+====
+Options available for all make targets:
 
-1. `VDI_BASE_URL` -- URL of VDI service to run tests against
-2. `AUTH_TOKEN` -- Auth token of user to run the tests as
+`DRY_RUN`::
+  Set to `1` to disable command execution.  The `curl-command.sh` file will be
+  generated, but will not be run automatically.
+====
+--
 
-[source]
+=== Create Dataset
+
+==== BIOM Datasets
+
+Submits a BIOM dataset to the VDI API using the test data and configuration
+defined in link:requests/create-dataset/biom[].
+
+[source, bash]
+make create-dataset-biom
+
+==== GeneList Datasets
+
+Submits a GeneList dataset to the VDI API using the test data and configuration
+defined in link:requests/create-dataset/genelist/plasmo-01[].
+
+[source, bash]
+make create-dataset-genelist-plasmo
+
+
+=== List Datasets
+
+
+==== List Visible User Datasets
+
+Gets a list of datasets visible to your user by way of ownership or sharing.
+
+[source, shell]
+make list-my-datasets
+
+
+==== Print Visible User Datasets
+
+Prints the list of datasets visible to your user to the console as formatted
+JSON.
+
+[source, bash]
+make print-my-datasets
+
+=== Delete Datasets
+
+Deletes a target dataset.
+
+.Command
+[source, bash]
+make delete-dataset
+
+.Additional Options
+--
+====
+`DATASET_ID`::
+When provided, defines the ID of the target dataset to be deleted.  If not
+provided, the test script will prompt for the target dataset's ID.
+====
+--
+
+.Example 1: User Input
+[%collapsible]
+====
+[source, shell]
 ----
-./gradlew --rerun-tasks api-test
+$ make delete-dataset
+Dataset ID: <input dataset id>
+----
+====
+
+.Example 2: With Option
+[source, shell]
+----
+$ make delete-dataset
+Dataset ID: <input dataset id>
 ----

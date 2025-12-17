@@ -68,7 +68,7 @@ while getopts ':H:M:h:f:dp:q:' option; do
 done
 
 declare -r timestamp=$(date +%s%3N)
-declare -r resultDir=curl-$timestamp
+declare -r resultDir=test-$timestamp
 
 mkdir $resultDir
 echo $resultDir

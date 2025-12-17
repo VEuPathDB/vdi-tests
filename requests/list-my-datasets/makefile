@@ -1,6 +1,4 @@
-.ONESHELL:
 ROOT_DIR :=../..
-CUR_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
 CURL_UTIL := $(ROOT_DIR)/utils/curl.sh
 
