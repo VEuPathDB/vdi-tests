@@ -61,6 +61,9 @@ Options available for all make targets:
 `DRY_RUN`::
   Set to `1` to disable command execution.  The `curl-command.sh` file will be
   generated, but will not be run automatically.
++
+[source, bash]
+make DRY_RUN=1 some-target
 ====
 --
 
