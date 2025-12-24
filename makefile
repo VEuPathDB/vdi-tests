@@ -52,9 +52,19 @@ print-my-datasets: TEST_DIR := requests/list-my-datasets
 print-my-datasets: TEST_COMMAND := list-my-datasets
 print-my-datasets:  __env_test
 	@RESULT_DIR="$$($(MAKE_REQUEST_COMMAND))"; \
-	if [ -n "$$RESULT_DIR" ]; then \
-		jq . requests/list-my-datasets/$$RESULT_DIR/body.txt; \
-		rm -rf requests/list-my-datasets/$$RESULT_DIR; \
+	if [ "$$?" -ne 0 ]; then echo "REQUEST FAILED!!!"; fi; \
+	if [ -n "$${RESULT_DIR}" ]; then \
+		STATUS_CODE_FILE="$(TEST_DIR)/$${RESULT_DIR}/status.txt"; \
+		STATUS_CODE_VALUE="$$([ -f "$${STATUS_CODE_FILE}" ] && cat "$${STATUS_CODE_FILE}" || echo -n 'unknown')"; \
+		if [ $${STATUS_CODE_VALUE} = '200' ]; then \
+			jq . $(TEST_DIR)/$${RESULT_DIR}/body.txt; \
+			rm -rf $(TEST_DIR)/$${RESULT_DIR}; \
+		else \
+			mv $(TEST_DIR)/$${RESULT_DIR} $(TEST_OUTPUT_DIR); \
+			echo "response status: $${STATUS_CODE_VALUE}"; \
+			echo ""; \
+			echo "output saved in $(TEST_OUTPUT_DIR)/$${RESULT_DIR}"; \
+		fi; \
 	else \
 		echo "NO RESULT"; \
 		exit 1; \
@@ -95,6 +105,13 @@ create-genelist-plasmo-dataset: __create_dataset_request
 delete-dataset: TEST_DIR := requests/delete-dataset
 delete-dataset: TEST_COMMAND := delete-dataset
 delete-dataset: __test_request
+
+
+.PHONY: patch-dataset-make-public
+patch-dataset-make-public: TEST_DIR := requests/patch-dataset
+patch-dataset-make-public: TEST_COMMAND := make-public
+patch-dataset-make-public: __test_request
+
 
 
 # ╔══════════════════════════════════════════════════════════════════════════╗ #
@@ -140,8 +157,15 @@ __create_dataset_request: __env_test
 .PHONY: __test_request
 __test_request: __env_test
 	@RESULT_DIR="$$($(MAKE_REQUEST_COMMAND))"; \
-		if [ "$$?" -ne 0 ]; then echo "REQUEST FAILED!!!"; fi; \
-		if [ -n "$$RESULT_DIR" ]; then mv $(TEST_DIR)/$$RESULT_DIR $(TEST_OUTPUT_DIR); echo "Output saved in $(TEST_OUTPUT_DIR)/$${RESULT_DIR}"; fi
+	if [ "$$?" -ne 0 ]; then echo "REQUEST FAILED!!!"; fi; \
+	if [ -n "$${RESULT_DIR}" ]; then \
+		mv $(TEST_DIR)/$${RESULT_DIR} $(TEST_OUTPUT_DIR); \
+		STATUS_CODE_FILE="$(TEST_OUTPUT_DIR)/$${RESULT_DIR}/status.txt"; \
+		STATUS_CODE_VALUE="$$([ -f "$${STATUS_CODE_FILE}" ] && cat "$${STATUS_CODE_FILE}" || echo -n 'unknown')"; \
+		echo "response status: $${STATUS_CODE_VALUE}"; \
+		echo ""; \
+		echo "output saved in $(TEST_OUTPUT_DIR)/$${RESULT_DIR}"; \
+	fi
 
 
 .PHONY: __env_test

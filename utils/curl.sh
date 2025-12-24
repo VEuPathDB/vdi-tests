@@ -1,10 +1,11 @@
 #!/usr/bin/env sh
 
-declare vdiHost="http://localhost:8080"
+declare vdiHost="http://localhost:8081"
 declare httpMethod="GET"
 declare endpointPath=""
 declare httpHeaders=""
 declare formInputs=""
+declare dataInput=""
 declare -i dryRun=0
 
 parseMap() {
@@ -36,7 +37,12 @@ buildMultilineCommand() {
     output+="$(buildMapLines "-F" "=" "${3}")"
   fi
 
-  output+="$(printf ' \\\n  %s' "${4}")"
+  # Data Input
+  if [ -n "${4}" ]; then
+    output+="$(printf ' \\\n  -d %s' "'${4}'")"
+  fi
+
+  output+="$(printf ' \\\n  %s' "${5}")"
 
   echo "$output"
 }
@@ -56,6 +62,9 @@ while getopts ':H:M:h:f:dp:q:' option; do
       formInputs="${OPTARG}"
       ;;
     d)
+      dataInput="${OPTARG}"
+      ;;
+    D)
       dryRun=1
       ;;
     p)
@@ -77,6 +86,7 @@ buildMultilineCommand \
   "${httpMethod}" \
   "${httpHeaders}" \
   "${formInputs}" \
+  "${dataInput}" \
   "${vdiHost}${endpointPath}${queryString}" \
   > ${resultDir}/curl-command.sh
 

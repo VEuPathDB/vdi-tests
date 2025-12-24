@@ -8,7 +8,7 @@ HEADERS := {}
 
 __EXTRA_FLAGS :=
 ifneq ($(DRY_RUN),0)
-	__EXTRA_FLAGS += -d
+	__EXTRA_FLAGS += -D
 endif
 
 .PHONY: default
