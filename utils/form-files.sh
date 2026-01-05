@@ -30,19 +30,19 @@ fi
 
 if [ "${#dataFiles[@]}" -gt 0 ]; then
   for f in "${dataFiles[@]}"; do
-    jsonValue=$(jq -c '.dataFiles += ["@'"${f}"'"]' <<< "${jsonValue}")
+    jsonValue=$(jq -c '.dataFile += ["@'"${f}"'"]' <<< "${jsonValue}")
   done
 fi
 
 if [ "${#propFiles[@]}" -gt 0 ]; then
   for f in "${propFiles[@]}"; do
-    jsonValue=$(jq -c '.dataPropertiesFiles += ["@'"${f}"'"]' <<< "${jsonValue}")
+    jsonValue=$(jq -c '.dataPropertiesFile += ["@'"${f}"'"]' <<< "${jsonValue}")
   done
 fi
 
 if [ "${#docFiles[@]}" -gt 0 ]; then
   for f in "${docFiles[@]}"; do
-    jsonValue=$(jq -c '.docFiles += ["@'"${f}"'"]' <<< "${jsonValue}")
+    jsonValue=$(jq -c '.docFile += ["@'"${f}"'"]' <<< "${jsonValue}")
   done
 fi
 
